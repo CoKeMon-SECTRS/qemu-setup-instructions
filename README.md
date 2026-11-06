@@ -51,15 +51,22 @@ $ROOT/
 ## 1. Set up the Linaro CCA base system
 
 This project is built on top of the Linaro OP-TEE QEMU v8 CCA reference stack.
-The original Linaro CCA build instructions are at
+The original Linaro CCA build instructions were at
 [gitlab.com/Linaro/cca-public/build-instructions](https://gitlab.com/Linaro/cca-public/build-instructions).
-The manifest is hosted at `git.codelinaro.org` and uses the `cca/v7` branch.
+
+> **Note:** The original manifest was hosted on `git.codelinaro.org` (branch
+> `cca/v7`), which is no longer publicly accessible. The original repo manifest
+> files are preserved in this repository as `qemu_v8_cca.xml` and `common.xml`
+> for reference. The `repo init` and `repo sync` commands below will only work
+> if `git.codelinaro.org` becomes available again or if you mirror the affected
+> repos (build, TF-A, RMM, buildroot-external-cca) to an accessible location
+> and update the manifest URLs accordingly.
 
 ```bash
 # From $ROOT
 mkdir cca && cd cca
 repo init -u https://git.codelinaro.org/linaro/dcap/op-tee-4.2.0/manifest.git \
-    -b cca/v7
+    -b cca/v7 -m qemu_v8_cca.xml
 repo sync -j$(nproc)
 cd ..
 ```
@@ -221,6 +228,8 @@ dd if=/dev/zero of=cca/fake-disk/log.img bs=512 seek=2048 count=20 conv=notrunc
 ```
 qemu-setup-instructions/
 ├── README.md                 # This file
+├── qemu_v8_cca.xml           # Original Linaro CCA repo manifest
+├── common.xml                # Shared manifest (included by qemu_v8_cca.xml)
 ├── manifest.xml              # Custom ham manifest for L4Re + Fiasco
 ├── read.sh                   # Script to read logged data from the disk image
 └── patches/

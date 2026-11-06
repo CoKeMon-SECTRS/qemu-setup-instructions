@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+        <remote name="github" fetch="https://github.com" />
+        <remote name="clo"    fetch="https://git.codelinaro.org/linaro/dcap" />
+        <default remote="github" revision="master" />
+
+        <!-- OP-TEE gits -->
+        <project path="optee_client"         name="OP-TEE/optee_client.git" revision="refs/tags/4.2.0" clone-depth="1" />
+        <project path="optee_os"             name="OP-TEE/optee_os.git" revision="refs/tags/4.2.0" clone-depth="1" />
+        <project path="optee_test"           name="OP-TEE/optee_test.git" revision="refs/tags/4.2.0" clone-depth="1" />
+
+        <!-- linaro-swg gits -->
+        <project path="linux"                name="linux-arm/linux-cca" revision="cca-host/v7" remote="arm-gitlab" clone-depth="1" />
+        <project path="qemu"                 name="qemu/qemu.git"                         revision="stable-9.2" />
+        <project path="optee_examples"       name="linaro-swg/optee_examples.git" revision="refs/tags/4.2.0" clone-depth="1" />
+
+        <!-- buildroot git -->
+        <project path="buildroot"            name="buildroot/buildroot.git"               revision="refs/tags/2024.08" clone-depth="1" />
+
+        <project path="buildroot-external-cca" name="buildroot-external-cca.git"             revision="9f5e19c1727b41ff390f161db02f7a4d067ede4f" remote="clo" clone-depth="1" />
+</manifest>
