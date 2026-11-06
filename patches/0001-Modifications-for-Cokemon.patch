@@ -1,0 +1,618 @@
+From 8fea5d6bdac759d75a69738db942782dd11bb677 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cl=C3=A9ment=20Thorens?= <clement.thorens@inf.ethz.ch>
+Date: Thu, 5 Nov 2026 11:12:50 +0100
+Subject: [PATCH] Modifications for Cokemon
+
+---
+ cca.dts           | 480 ++++++++++++++++++++++++++++++++++++++++++++++
+ dtb.sh            |   1 +
+ kconfigs/cca.conf |   1 +
+ qemu_v8_cca.mk    |  36 +++-
+ run.sh            |   1 +
+ 5 files changed, 510 insertions(+), 9 deletions(-)
+ create mode 100644 cca.dts
+ create mode 100755 dtb.sh
+ create mode 100755 run.sh
+
+diff --git a/cca.dts b/cca.dts
+new file mode 100644
+index 0000000..0695ddf
+--- /dev/null
++++ b/cca.dts
+@@ -0,0 +1,480 @@
++/dts-v1/;
++
++/ {
++	interrupt-parent = <0x8002>;
++	dma-coherent;
++	model = "linux,dummy-virt";
++	#size-cells = <0x02>;
++	#address-cells = <0x02>;
++	compatible = "linux,dummy-virt";
++
++	memory@40000000 {
++		reg = <0x00 0x40000000 0x01 0x00>;
++		device_type = "memory";
++	};
++
++	reserved-memory {
++		#address-cells = <0x02>;
++		#size-cells = <0x02>;
++		ranges;
++
++		microkernel@c0000000 {
++			compatible = "microkernel";
++			reg = <0x00 0xc0000000 0x00 0x40000000>;
++			no-map;
++		};
++		linux@40000000 {
++			compatible = "linux";
++			reg = <0x00 0x40000000 0x00 0x7fffd000>;
++			no-map;
++		};
++		linux2@100000000 {
++			compatible = "linux";
++			reg = <0x01 0x00000000 0x00 0x40000000>;
++			no-map;
++		};
++	};
++
++	platform-bus@c000000 {
++		interrupt-parent = <0x8002>;
++		ranges = <0x00 0x00 0xc000000 0x2000000>;
++		#address-cells = <0x01>;
++		#size-cells = <0x01>;
++		compatible = "qemu,platform\0simple-bus";
++	};
++
++	fw-cfg@9020000 {
++		dma-coherent;
++		reg = <0x00 0x9020000 0x00 0x18>;
++		compatible = "qemu,fw-cfg-mmio";
++	};
++
++	virtio_mmio@a000000 {
++		dma-coherent;
++		interrupts = <0x00 0x10 0x01>;
++		reg = <0x00 0xa000000 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a000200 {
++		dma-coherent;
++		interrupts = <0x00 0x11 0x01>;
++		reg = <0x00 0xa000200 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a000400 {
++		dma-coherent;
++		interrupts = <0x00 0x12 0x01>;
++		reg = <0x00 0xa000400 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a000600 {
++		dma-coherent;
++		interrupts = <0x00 0x13 0x01>;
++		reg = <0x00 0xa000600 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a000800 {
++		dma-coherent;
++		interrupts = <0x00 0x14 0x01>;
++		reg = <0x00 0xa000800 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a000a00 {
++		dma-coherent;
++		interrupts = <0x00 0x15 0x01>;
++		reg = <0x00 0xa000a00 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a000c00 {
++		dma-coherent;
++		interrupts = <0x00 0x16 0x01>;
++		reg = <0x00 0xa000c00 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a000e00 {
++		dma-coherent;
++		interrupts = <0x00 0x17 0x01>;
++		reg = <0x00 0xa000e00 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a001000 {
++		dma-coherent;
++		interrupts = <0x00 0x18 0x01>;
++		reg = <0x00 0xa001000 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a001200 {
++		dma-coherent;
++		interrupts = <0x00 0x19 0x01>;
++		reg = <0x00 0xa001200 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a001400 {
++		dma-coherent;
++		interrupts = <0x00 0x1a 0x01>;
++		reg = <0x00 0xa001400 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a001600 {
++		dma-coherent;
++		interrupts = <0x00 0x1b 0x01>;
++		reg = <0x00 0xa001600 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a001800 {
++		dma-coherent;
++		interrupts = <0x00 0x1c 0x01>;
++		reg = <0x00 0xa001800 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a001a00 {
++		dma-coherent;
++		interrupts = <0x00 0x1d 0x01>;
++		reg = <0x00 0xa001a00 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a001c00 {
++		dma-coherent;
++		interrupts = <0x00 0x1e 0x01>;
++		reg = <0x00 0xa001c00 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a001e00 {
++		dma-coherent;
++		interrupts = <0x00 0x1f 0x01>;
++		reg = <0x00 0xa001e00 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a002000 {
++		dma-coherent;
++		interrupts = <0x00 0x20 0x01>;
++		reg = <0x00 0xa002000 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a002200 {
++		dma-coherent;
++		interrupts = <0x00 0x21 0x01>;
++		reg = <0x00 0xa002200 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a002400 {
++		dma-coherent;
++		interrupts = <0x00 0x22 0x01>;
++		reg = <0x00 0xa002400 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a002600 {
++		dma-coherent;
++		interrupts = <0x00 0x23 0x01>;
++		reg = <0x00 0xa002600 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a002800 {
++		dma-coherent;
++		interrupts = <0x00 0x24 0x01>;
++		reg = <0x00 0xa002800 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a002a00 {
++		dma-coherent;
++		interrupts = <0x00 0x25 0x01>;
++		reg = <0x00 0xa002a00 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a002c00 {
++		dma-coherent;
++		interrupts = <0x00 0x26 0x01>;
++		reg = <0x00 0xa002c00 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a002e00 {
++		dma-coherent;
++		interrupts = <0x00 0x27 0x01>;
++		reg = <0x00 0xa002e00 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a003000 {
++		dma-coherent;
++		interrupts = <0x00 0x28 0x01>;
++		reg = <0x00 0xa003000 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a003200 {
++		dma-coherent;
++		interrupts = <0x00 0x29 0x01>;
++		reg = <0x00 0xa003200 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a003400 {
++		dma-coherent;
++		interrupts = <0x00 0x2a 0x01>;
++		reg = <0x00 0xa003400 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a003600 {
++		dma-coherent;
++		interrupts = <0x00 0x2b 0x01>;
++		reg = <0x00 0xa003600 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a003800 {
++		dma-coherent;
++		interrupts = <0x00 0x2c 0x01>;
++		reg = <0x00 0xa003800 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a003a00 {
++		dma-coherent;
++		interrupts = <0x00 0x2d 0x01>;
++		reg = <0x00 0xa003a00 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a003c00 {
++		dma-coherent;
++		interrupts = <0x00 0x2e 0x01>;
++		reg = <0x00 0xa003c00 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	virtio_mmio@a003e00 {
++		dma-coherent;
++		interrupts = <0x00 0x2f 0x01>;
++		reg = <0x00 0xa003e00 0x00 0x200>;
++		compatible = "virtio,mmio";
++	};
++
++	gpio-restart {
++		secure-status = "okay";
++		status = "disabled";
++		gpios = <0x8006 0x01 0x00>;
++		compatible = "gpio-restart";
++	};
++
++	gpio-poweroff {
++		secure-status = "okay";
++		status = "disabled";
++		gpios = <0x8006 0x00 0x00>;
++		compatible = "gpio-poweroff";
++	};
++
++	pl061@90b0000 {
++		secure-status = "okay";
++		status = "disabled";
++		phandle = <0x8006>;
++		clock-names = "apb_pclk";
++		clocks = <0x8000>;
++		interrupts = <0x00 0x00 0x04>;
++		gpio-controller;
++		#gpio-cells = <0x02>;
++		compatible = "arm,pl061\0arm,primecell";
++		reg = <0x00 0x90b0000 0x00 0x1000>;
++	};
++
++	gpio-keys {
++		compatible = "gpio-keys";
++
++		poweroff {
++			gpios = <0x8005 0x03 0x00>;
++			linux,code = <0x74>;
++			label = "GPIO Key Poweroff";
++		};
++	};
++
++	pl061@9030000 {
++		phandle = <0x8005>;
++		clock-names = "apb_pclk";
++		clocks = <0x8000>;
++		interrupts = <0x00 0x07 0x04>;
++		gpio-controller;
++		#gpio-cells = <0x02>;
++		compatible = "arm,pl061\0arm,primecell";
++		reg = <0x00 0x9030000 0x00 0x1000>;
++	};
++
++	smmuv3@9050000 {
++		phandle = <0x8004>;
++		#iommu-cells = <0x01>;
++		dma-coherent;
++		interrupt-names = "eventq\0priq\0cmdq-sync\0gerror";
++		interrupts = <0x00 0x4a 0x01 0x00 0x4b 0x01 0x00 0x4c 0x01 0x00 0x4d 0x01>;
++		reg = <0x00 0x9050000 0x00 0x20000>;
++		compatible = "arm,smmu-v3";
++	};
++
++	pcie@10000000 {
++		iommu-map = <0x00 0x8004 0x00 0x10000>;
++		interrupt-map-mask = <0x1800 0x00 0x00 0x07>;
++		interrupt-map = <0x00 0x00 0x00 0x01 0x8002 0x00 0x00 0x00 0x03 0x04 0x00 0x00 0x00 0x02 0x8002 0x00 0x00 0x00 0x04 0x04 0x00 0x00 0x00 0x03 0x8002 0x00 0x00 0x00 0x05 0x04 0x00 0x00 0x00 0x04 0x8002 0x00 0x00 0x00 0x06 0x04 0x800 0x00 0x00 0x01 0x8002 0x00 0x00 0x00 0x04 0x04 0x800 0x00 0x00 0x02 0x8002 0x00 0x00 0x00 0x05 0x04 0x800 0x00 0x00 0x03 0x8002 0x00 0x00 0x00 0x06 0x04 0x800 0x00 0x00 0x04 0x8002 0x00 0x00 0x00 0x03 0x04 0x1000 0x00 0x00 0x01 0x8002 0x00 0x00 0x00 0x05 0x04 0x1000 0x00 0x00 0x02 0x8002 0x00 0x00 0x00 0x06 0x04 0x1000 0x00 0x00 0x03 0x8002 0x00 0x00 0x00 0x03 0x04 0x1000 0x00 0x00 0x04 0x8002 0x00 0x00 0x00 0x04 0x04 0x1800 0x00 0x00 0x01 0x8002 0x00 0x00 0x00 0x06 0x04 0x1800 0x00 0x00 0x02 0x8002 0x00 0x00 0x00 0x03 0x04 0x1800 0x00 0x00 0x03 0x8002 0x00 0x00 0x00 0x04 0x04 0x1800 0x00 0x00 0x04 0x8002 0x00 0x00 0x00 0x05 0x04>;
++		#interrupt-cells = <0x01>;
++		ranges = <0x1000000 0x00 0x00 0x00 0x3eff0000 0x00 0x10000 0x2000000 0x00 0x10000000 0x00 0x10000000 0x00 0x2eff0000 0x3000000 0x80 0x00 0x80 0x00 0x80 0x00>;
++		reg = <0x40 0x10000000 0x00 0x10000000>;
++		msi-map = <0x00 0x8003 0x00 0x10000>;
++		dma-coherent;
++		bus-range = <0x00 0xff>;
++		linux,pci-domain = <0x00>;
++		#size-cells = <0x02>;
++		#address-cells = <0x03>;
++		device_type = "pci";
++		compatible = "pci-host-ecam-generic";
++	};
++
++	pl031@9010000 {
++		clock-names = "apb_pclk";
++		clocks = <0x8000>;
++		interrupts = <0x00 0x02 0x04>;
++		reg = <0x00 0x9010000 0x00 0x1000>;
++		compatible = "arm,pl031\0arm,primecell";
++	};
++
++	secram@e000000 {
++		secure-status = "okay";
++		status = "disabled";
++		reg = <0x00 0xe000000 0x00 0x1000000>;
++		device_type = "memory";
++	};
++
++	pl011@9040000 {
++		secure-status = "okay";
++		status = "disabled";
++		clock-names = "uartclk\0apb_pclk";
++		clocks = <0x8000 0x8000>;
++		interrupts = <0x00 0x08 0x04>;
++		reg = <0x00 0x9040000 0x00 0x1000>;
++		compatible = "arm,pl011\0arm,primecell";
++	};
++
++	pl011@9000000 {
++		clock-names = "uartclk\0apb_pclk";
++		clocks = <0x8000 0x8000>;
++		interrupts = <0x00 0x01 0x04>;
++		reg = <0x00 0x9000000 0x00 0x1000>;
++		compatible = "arm,pl011\0arm,primecell";
++	};
++
++	pmu {
++		interrupts = <0x01 0x07 0x04>;
++		compatible = "arm,armv8-pmuv3";
++	};
++
++	intc@8000000 {
++		phandle = <0x8002>;
++		interrupts = <0x01 0x09 0x04>;
++		reg = <0x00 0x8000000 0x00 0x10000 0x00 0x80a0000 0x00 0xf60000>;
++		#redistributor-regions = <0x01>;
++		compatible = "arm,gic-v3";
++		ranges;
++		#size-cells = <0x02>;
++		#address-cells = <0x02>;
++		interrupt-controller;
++		#interrupt-cells = <0x03>;
++
++		its@8080000 {
++			phandle = <0x8003>;
++			reg = <0x00 0x8080000 0x00 0x20000>;
++			#msi-cells = <0x01>;
++			msi-controller;
++			compatible = "arm,gic-v3-its";
++		};
++	};
++
++	flash@4000000 {
++		bank-width = <0x04>;
++		reg = <0x00 0x4000000 0x00 0x4000000>;
++		compatible = "cfi-flash";
++	};
++
++	secflash@0 {
++		secure-status = "okay";
++		status = "disabled";
++		bank-width = <0x04>;
++		reg = <0x00 0x00 0x00 0x4000000>;
++		compatible = "cfi-flash";
++	};
++
++	cpus {
++		#size-cells = <0x00>;
++		#address-cells = <0x01>;
++
++		cpu-map {
++
++			socket0 {
++
++				cluster0 {
++
++					core0 {
++						cpu = <0x8001>;
++					};
++				};
++			};
++		};
++
++		cpu@0 {
++			phandle = <0x8001>;
++			reg = <0x00>;
++			compatible = "arm,cortex-a57";
++			device_type = "cpu";
++		};
++	};
++
++	timer {
++		interrupts = <0x01 0x0d 0x04 0x01 0x0e 0x04 0x01 0x0b 0x04 0x01 0x0a 0x04 0x01 0x0c 0x04>;
++		always-on;
++		compatible = "arm,armv8-timer\0arm,armv7-timer";
++	};
++
++	apb-pclk {
++		phandle = <0x8000>;
++		clock-output-names = "clk24mhz";
++		clock-frequency = <0x16e3600>;
++		#clock-cells = <0x00>;
++		compatible = "fixed-clock";
++	};
++
++	aliases {
++		serial1 = "/pl011@9040000";
++		serial0 = "/pl011@9000000";
++	};
++
++	secure-chosen {
++		stdout-path = "/pl011@9040000";
++		rng-seed = <0x5eae3ed 0x867861af 0x58db5c20 0xf95a3189 0xb1550d3b 0x8726112d 0x54b429f 0x1b46cfdc>;
++		kaslr-seed = <0x967b5847 0xdebaf2cd>;
++	};
++
++	chosen {
++		bootargs = "root=/dev/vda earlycon console=hvc0 nokaslr pci-stub.ids=1b36:0007";
++		stdout-path = "/pl011@9000000";
++		rng-seed = <0xb8488f21 0x6890bde8 0x1e7b8c63 0x4c19d239 0xd82ce434 0x8053faad 0x30168c19 0xe113fc8d>;
++		kaslr-seed = <0xf0b581f0 0x8e900b0c>;
++	};
++};
+diff --git a/dtb.sh b/dtb.sh
+new file mode 100755
+index 0000000..8370820
+--- /dev/null
++++ b/dtb.sh
+@@ -0,0 +1 @@
++dtc  -I dts -O dtb -o cca.dtb cca.dts
+diff --git a/kconfigs/cca.conf b/kconfigs/cca.conf
+index aa4c3ee..38d7651 100644
+--- a/kconfigs/cca.conf
++++ b/kconfigs/cca.conf
+@@ -3,3 +3,4 @@ CONFIG_ARM_CCA_GUEST=y
+ # Smaller timer frequency to reduce the number of Realm<>Host context switches
+ CONFIG_HZ_250=n
+ CONFIG_HZ_100=y
++CONFIG_PCI_STUB=y
+diff --git a/qemu_v8_cca.mk b/qemu_v8_cca.mk
+index 0f36bc8..bb5dd2d 100644
+--- a/qemu_v8_cca.mk
++++ b/qemu_v8_cca.mk
+@@ -31,6 +31,7 @@ RUST_ENABLE ?= y
+ include common.mk
+ 
+ DEBUG ?= 1
++$(info DEBUG is $(DEBUG))
+ 
+ # Option to build with GICV3 enabled
+ GICV3 ?= y
+@@ -168,15 +169,19 @@ else
+ TF_A_LOGLVL ?= 40
+ TF_A_OUT = $(TF_A_PATH)/build/qemu/debug
+ endif
++TF_A_LOGLVL = 40
+ 
+ TF_A_FLAGS ?= \
+-	BL33=$(BL33_BIN) \
++	ARM_LINUX_KERNEL_AS_BL33=1 \
+ 	PLAT=qemu \
+ 	QEMU_USE_GIC_DRIVER=$(TFA_GIC_DRIVER) \
+ 	DEBUG=$(TF_A_DEBUG) \
+ 	LOG_LEVEL=$(TF_A_LOGLVL) \
+ 	ENABLE_RME=1 \
+-	RMM=$(RMM_BIN)
++	RMM=$(RMM_BIN) \
++	PRELOADED_BL33_BASE=0xc0000000
++	# PRELOADED_BL33_BASE=0x80000000
++	# BL33=$(BL33_BIN) \
+ 
+ TF_A_FLAGS_BL32_OPTEE  = BL32=$(OPTEE_OS_HEADER_V2_BIN)
+ TF_A_FLAGS_BL32_OPTEE += BL32_EXTRA1=$(OPTEE_OS_PAGER_V2_BIN)
+@@ -272,7 +277,7 @@ else
+ endif
+ 	ln -sf $(BL33_BIN) $(BINARIES_PATH)/bl33.bin
+ 
+-arm-tf-clean: edk2-clean rmm-clean
++arm-tf-clean:
+ 	$(TF_A_EXPORTS) $(MAKE) -C $(TF_A_PATH) $(TF_A_FLAGS) clean
+ 
+ ################################################################################
+@@ -632,15 +637,13 @@ run-only:
+ 	$(call launch-terminal,54323,"Realm")
+ 	$(call wait-for-ports,54322,54323)
+ 	cd $(BINARIES_PATH) && $(QEMU_BUILD)/qemu-system-aarch64 \
+-         -M virt,virtualization=on,secure=on,gic-version=3 \
++         -M virt,virtualization=on,secure=on,gic-version=3,iommu=smmuv3 \
+          -M acpi=off -cpu max,x-rme=on,sme=off,pauth-impdef=on \
+-         -m 8G -smp 4 \
++         -m 4G -smp 1 \
+          -nographic \
+          -bios flash.bin \
+-         -kernel Image \
+          -drive format=raw,if=none,file=$(ROOT)/out-br/images/rootfs.ext4,id=hd0 \
+          -device virtio-blk-pci,drive=hd0 \
+-         -append root=/dev/vda \
+          -nodefaults \
+          -serial tcp:localhost:54320 \
+          -serial tcp:localhost:54321 \
+@@ -650,11 +653,26 @@ run-only:
+          -chardev socket,mux=on,id=hvc1,port=54323,host=localhost \
+          -device virtio-serial-device \
+          -device virtconsole,chardev=hvc1 \
+-         -append "root=/dev/vda earlycon console=hvc0 nokaslr" \
+          -device virtio-net-pci,netdev=net0 \
+          -netdev user,id=net0 \
+          -device virtio-9p-device,fsdev=shr0,mount_tag=shr0 \
+-         -fsdev local,security_model=none,path=../../,id=shr0
++         -fsdev local,security_model=none,path=../../,id=shr0 \
++	 -dtb cca.dtb \
++	 -monitor stdio \
++	 -gdb tcp::1234 \
++	 -drive id=sd_disk,file=$(ROOT)/fake-disk/log.img,if=none,format=raw \
++	 -device sdhci-pci,id=sdhci \
++	 -device sd-card,drive=sd_disk,spec_version=3 \
++	 -device loader,file=Image_Micro_Switch,addr=0xc0000000 \
++	 -device loader,file=Image_Linux,addr=0x80000000
++	 # -S \
++	 # -device ich9-ahci,id=ahci0 -drive id=log_disk,file=/tmp/log.img,if=none,format=raw -device ide-hd,drive=log_disk,bus=ahci0.0,serial=LOGDISK \
++	 # -device loader,file=Image_Micro_emmc_qemu,addr=0xc0000000 \
++	 # -d int \
++         # -M virt,virtualization=on,secure=on,gic-version=3 \
++         # -append root=/dev/vda \
++         # -append "root=/dev/vda earlycon console=hvc0 nokaslr" \
++         # -kernel Image \
+ 
+ ifneq ($(filter check check-rust,$(MAKECMDGOALS)),)
+ CHECK_DEPS := all
+diff --git a/run.sh b/run.sh
+new file mode 100755
+index 0000000..4d2ad85
+--- /dev/null
++++ b/run.sh
+@@ -0,0 +1 @@
++LAUNCH_TERMINAL="tmux new-window" make CCA_SUPPORT=y run-only
+-- 
+2.56.0
+

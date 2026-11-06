@@ -1,0 +1,1238 @@
+From 2578a69bf9c5583192ada810f4a6bf82e56b708d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Cl=C3=A9ment=20Thorens?= <clement.thorens@inf.ethz.ch>
+Date: Thu, 5 Nov 2026 10:38:40 +0100
+Subject: [PATCH] CoKeMon Modifications for Linux with QEMU
+
+---
+ arch/arm64/include/asm/rmi_cmds.h      |  50 +++
+ arch/arm64/include/asm/rmi_smc.h       |   5 +
+ arch/arm64/mm/fault.c                  |  11 +-
+ drivers/misc/Makefile                  |   4 +
+ drivers/misc/bench_count/bench_count.c | 137 ++++++
+ drivers/misc/log_micro/log_micro.c     | 209 +++++++++
+ drivers/misc/os_switch/os_switch.c     | 105 +++++
+ drivers/misc/unmap_trans/unmap_trans.c | 591 +++++++++++++++++++++++++
+ drivers/of/of_reserved_mem.c           |   4 +
+ 9 files changed, 1115 insertions(+), 1 deletion(-)
+ create mode 100644 drivers/misc/bench_count/bench_count.c
+ create mode 100644 drivers/misc/log_micro/log_micro.c
+ create mode 100644 drivers/misc/os_switch/os_switch.c
+ create mode 100644 drivers/misc/unmap_trans/unmap_trans.c
+
+diff --git a/arch/arm64/include/asm/rmi_cmds.h b/arch/arm64/include/asm/rmi_cmds.h
+index 043b7ff27..73a2fbee4 100644
+--- a/arch/arm64/include/asm/rmi_cmds.h
++++ b/arch/arm64/include/asm/rmi_cmds.h
+@@ -7,6 +7,7 @@
+ #define __ASM_RMI_CMDS_H
+ 
+ #include <linux/arm-smccc.h>
++#include <linux/interrupt.h>
+ 
+ #include <asm/rmi_smc.h>
+ 
+@@ -183,6 +184,55 @@ static inline int rmi_realm_activate(unsigned long rd)
+ 	return res.a0;
+ }
+ 
++static inline int rmi_os_switch_print(u64 addr, u64 len)
++{
++	struct arm_smccc_res res;
++
++	pr_debug("------------- CALL TO OS SWITCH Print %x --------------\n", SMC_RMI_OS_SWITCH);
++
++	arm_smccc_1_1_invoke(SMC_RMI_OS_SWITCH, addr, len, 2, &res);
++
++	return res.a0;
++}
++
++static inline int rmi_os_switch_print_count(int module)
++{
++	struct arm_smccc_res res;
++
++	arm_smccc_1_1_invoke(SMC_RMI_PRINT_COUNT,SMC_RMI_PRINT_COUNT,0,module, &res);
++
++	return res.a0;
++}
++
++static inline int rmi_os_switch_zero_count(int module)
++{
++	struct arm_smccc_res res;
++
++	arm_smccc_1_1_invoke(SMC_RMI_ZERO_COUNT,SMC_RMI_ZERO_COUNT,0,module, &res);
++
++	return res.a0;
++}
++
++static inline int rmi_os_switch_page(u64 addr)
++{
++	struct arm_smccc_res res;
++
++	pr_debug("------------- CALL TO OS SWITCH Page %x --------------\n", SMC_RMI_OS_SWITCH);
++
++	arm_smccc_1_1_invoke(SMC_RMI_OS_SWITCH, addr, 0, 1, &res);
++
++	return res.a0;
++}
++
++static inline int rmi_os_switch(void)
++{
++	struct arm_smccc_res res;
++
++	arm_smccc_1_1_invoke(SMC_RMI_OS_SWITCH, &res);
++
++	return res.a0;
++}
++
+ /**
+  * rmi_realm_create() - Create a realm
+  * @rd: PA of the RD
+diff --git a/arch/arm64/include/asm/rmi_smc.h b/arch/arm64/include/asm/rmi_smc.h
+index f85a82072..77cfd6e49 100644
+--- a/arch/arm64/include/asm/rmi_smc.h
++++ b/arch/arm64/include/asm/rmi_smc.h
+@@ -44,6 +44,11 @@
+ #define SMC_RMI_REC_AUX_COUNT		SMC_RMI_CALL(0x0167)
+ #define SMC_RMI_RTT_INIT_RIPAS		SMC_RMI_CALL(0x0168)
+ #define SMC_RMI_RTT_SET_RIPAS		SMC_RMI_CALL(0x0169)
++#define SMC_RMI_OS_SWITCH		SMC_RMI_CALL(0x0170)
++#define SMC_RMI_NOPE1			SMC_RMI_CALL(0x0171)
++#define SMC_RMI_NOPE2			SMC_RMI_CALL(0x0172)
++#define SMC_RMI_ZERO_COUNT		SMC_RMI_CALL(0x0173)
++#define SMC_RMI_PRINT_COUNT		SMC_RMI_CALL(0x0174)
+ 
+ #define RMI_ABI_MAJOR_VERSION	1
+ #define RMI_ABI_MINOR_VERSION	0
+diff --git a/arch/arm64/mm/fault.c b/arch/arm64/mm/fault.c
+index 29821dc89..891913c81 100644
+--- a/arch/arm64/mm/fault.c
++++ b/arch/arm64/mm/fault.c
+@@ -43,6 +43,7 @@
+ #include <asm/system_misc.h>
+ #include <asm/tlbflush.h>
+ #include <asm/traps.h>
++#include <asm/rmi_cmds.h>
+ 
+ struct fault_info {
+ 	int	(*fn)(unsigned long far, unsigned long esr,
+@@ -366,6 +367,12 @@ static bool is_el1_mte_sync_tag_check_fault(unsigned long esr)
+ 	return false;
+ }
+ 
++static bool micro_handle_ro_fault(unsigned long addr){
++	pte_t *pte = virt_to_kpte(addr);
++	rmi_os_switch_page((unsigned long long)virt_to_phys((void *)pte));
++	return true;
++}
++
+ static void __do_kernel_fault(unsigned long addr, unsigned long esr,
+ 			      struct pt_regs *regs)
+ {
+@@ -389,8 +396,10 @@ static void __do_kernel_fault(unsigned long addr, unsigned long esr,
+ 	}
+ 
+ 	if (is_el1_permission_fault(addr, esr, regs)) {
+-		if (esr & ESR_ELx_WNR)
++		if (esr & ESR_ELx_WNR){
++			if(micro_handle_ro_fault(addr)){return;}
+ 			msg = "write to read-only memory";
++		}
+ 		else if (is_el1_instruction_abort(esr))
+ 			msg = "execute from non-executable memory";
+ 		else
+diff --git a/drivers/misc/Makefile b/drivers/misc/Makefile
+index 545aad06d..575ead924 100644
+--- a/drivers/misc/Makefile
++++ b/drivers/misc/Makefile
+@@ -75,3 +75,7 @@ lan966x-pci-objs		:= lan966x_pci.o
+ lan966x-pci-objs		+= lan966x_pci.dtbo.o
+ obj-$(CONFIG_MCHP_LAN966X_PCI)	+= lan966x-pci.o
+ obj-y				+= keba/
++obj-y				+= os_switch/os_switch.o
++obj-y				+= unmap_trans/unmap_trans.o
++obj-y				+= log_micro/log_micro.o
++obj-y				+= bench_count/bench_count.o
+diff --git a/drivers/misc/bench_count/bench_count.c b/drivers/misc/bench_count/bench_count.c
+new file mode 100644
+index 000000000..cf07986c4
+--- /dev/null
++++ b/drivers/misc/bench_count/bench_count.c
+@@ -0,0 +1,137 @@
++#include <linux/atomic.h>
++#include <linux/cdev.h>
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/fs.h>
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/printk.h>
++#include <linux/types.h>
++#include <linux/version.h>
++
++#include <asm/errno.h>
++#include <asm/rmi_cmds.h>
++
++#include <asm/cacheflush.h>
++
++static int device_open(struct inode *, struct file *);
++static int device_release(struct inode *, struct file *);
++static ssize_t device_write(struct file *, const char __user *, size_t,
++                            loff_t *);
++
++#define DEVICE_NAME "bench_count" /* Dev name as it appears in /proc/devices   */
++#define LOG_BUFFER_SIZE 4096
++
++static int major; /* major number assigned to our device driver */
++
++static u8 * kernel_log_buf;
++
++static struct class *cls;
++
++static struct file_operations chardev_fops = {
++    .write = device_write,
++    .open = device_open,
++    .release = device_release,
++};
++
++static char *chardev_devnode(const struct device *dev, umode_t *mode)
++{
++    if (mode != NULL)
++        *mode = 0222;
++    return NULL;
++}
++
++static int __init chardev_init(void)
++{
++    major = register_chrdev(0, DEVICE_NAME, &chardev_fops);
++
++    if (major < 0) {
++        pr_alert("Registering char device failed with %d\n", major);
++        return major;
++    }
++
++    pr_debug("%s was assigned major number %d.\n", DEVICE_NAME, major);
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
++    cls = class_create(DEVICE_NAME);
++#else
++    cls = class_create(THIS_MODULE, DEVICE_NAME);
++#endif
++    cls->devnode = &chardev_devnode; 
++    device_create(cls, NULL, MKDEV(major, 0), NULL, DEVICE_NAME);
++
++    // counter=0;
++    // total_len=0;
++
++    pr_debug("Device created on /dev/%s\n", DEVICE_NAME);
++
++    return 0;
++}
++
++static void __exit chardev_exit(void)
++{
++    device_destroy(cls, MKDEV(major, 0));
++    class_destroy(cls);
++
++    /* Unregister the device */
++    unregister_chrdev(major, DEVICE_NAME);
++}
++
++/* Methods */
++
++/* Called when a process tries to open the device file, like
++ * "sudo cat /dev/chardev"
++ */
++static int device_open(struct inode *inode, struct file *file)
++{
++	pr_info("Open device %s\n",DEVICE_NAME);
++	kernel_log_buf = kmalloc(LOG_BUFFER_SIZE, GFP_KERNEL);
++	if (!kernel_log_buf)
++		return -ENOMEM;
++	return 0;
++}
++
++/* Called when a process closes the device file. */
++static int device_release(struct inode *inode, struct file *file)
++{
++    kfree(kernel_log_buf);
++    pr_info("Device %s released\n",DEVICE_NAME);
++    return 0;
++}
++
++static ssize_t device_write(struct file *filp, const char __user *buff,
++			    size_t len, loff_t *off)
++{
++	int offset;
++	// pr_info("Write %zu bytes to %s - total length is %zu\n", len,DEVICE_NAME, total_len);
++
++	if (copy_from_user(kernel_log_buf, buff, len)) {
++		pr_err("Failed to copy data from user space\n");
++		return -EFAULT;
++	}
++
++	if(strncmp(kernel_log_buf, "ZEROLOG", 7)==0){
++		rmi_os_switch_zero_count(2);
++		return len;
++	}
++	if(strncmp(kernel_log_buf, "PRINTLOG", 8)==0){
++		rmi_os_switch_print_count(2);
++		return len;
++	}
++	if(strncmp(kernel_log_buf, "ZEROPT", 6)==0){
++		rmi_os_switch_print_count(3);
++		return len;
++	}
++	if(strncmp(kernel_log_buf, "PRINTPT", 7)==0){
++		rmi_os_switch_print_count(4);
++		return len;
++	}
++
++
++	return len;
++}
++
++module_init(chardev_init);
++module_exit(chardev_exit);
++
++MODULE_LICENSE("GPL");
+diff --git a/drivers/misc/log_micro/log_micro.c b/drivers/misc/log_micro/log_micro.c
+new file mode 100644
+index 000000000..eac80156a
+--- /dev/null
++++ b/drivers/misc/log_micro/log_micro.c
+@@ -0,0 +1,209 @@
++#include <linux/atomic.h>
++#include <linux/cdev.h>
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/fs.h>
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/printk.h>
++#include <linux/types.h>
++#include <linux/version.h>
++
++#include <asm/errno.h>
++#include <asm/rmi_cmds.h>
++
++#include <asm/cacheflush.h>
++
++static int device_open(struct inode *, struct file *);
++static int device_release(struct inode *, struct file *);
++static ssize_t device_write(struct file *, const char __user *, size_t,
++                            loff_t *);
++
++#define FLUSH_FREQ 4
++#define MAX_SIZE 8
++#define UNIT_BUFF 4096
++#define DEVICE_NAME "logmicro" /* Dev name as it appears in /proc/devices   */
++#define LOG_BUFFER_SIZE UNIT_BUFF*MAX_SIZE
++
++static int major; /* major number assigned to our device driver */
++
++static u8 * kernel_log_buf;
++// static size_t total_len;
++// static u8 counter;
++static atomic_t total_len = ATOMIC_INIT(0);
++static atomic_t total_len2 = ATOMIC_INIT(0);
++static atomic_t buffer_num = ATOMIC_INIT(0);
++static atomic_t flushed_ptr = ATOMIC_INIT(0);
++
++static spinlock_t reset;
++
++static struct class *cls;
++
++static struct file_operations chardev_fops = {
++    .write = device_write,
++    .open = device_open,
++    .release = device_release,
++};
++
++static char *chardev_devnode(const struct device *dev, umode_t *mode)
++{
++    if (mode != NULL)
++        *mode = 0222;
++    return NULL;
++}
++
++static int __init chardev_init(void)
++{
++    major = register_chrdev(0, DEVICE_NAME, &chardev_fops);
++
++    if (major < 0) {
++        pr_alert("Registering char device failed with %d\n", major);
++        return major;
++    }
++
++    pr_debug("%s was assigned major number %d.\n", DEVICE_NAME, major);
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
++    cls = class_create(DEVICE_NAME);
++#else
++    cls = class_create(THIS_MODULE, DEVICE_NAME);
++#endif
++    cls->devnode = &chardev_devnode; 
++    device_create(cls, NULL, MKDEV(major, 0), NULL, DEVICE_NAME);
++
++    // counter=0;
++    // total_len=0;
++
++    pr_debug("Device created on /dev/%s\n", DEVICE_NAME);
++
++    return 0;
++}
++
++static void __exit chardev_exit(void)
++{
++    device_destroy(cls, MKDEV(major, 0));
++    class_destroy(cls);
++
++    /* Unregister the device */
++    unregister_chrdev(major, DEVICE_NAME);
++}
++
++/* Methods */
++
++/* Called when a process tries to open the device file, like
++ * "sudo cat /dev/chardev"
++ */
++static int device_open(struct inode *inode, struct file *file)
++{
++	pr_info("Open device %s\n",DEVICE_NAME);
++	kernel_log_buf = kmalloc(2*LOG_BUFFER_SIZE, GFP_KERNEL);
++	if (!kernel_log_buf)
++		return -ENOMEM;
++	return 0;
++}
++
++/* Called when a process closes the device file. */
++static int device_release(struct inode *inode, struct file *file)
++{
++    kfree(kernel_log_buf);
++    pr_info("Device %s released\n",DEVICE_NAME);
++    return 0;
++}
++
++static ssize_t device_write(struct file *filp, const char __user *buff,
++			    size_t len, loff_t *off)
++{
++	int offset;
++	// pr_info("Write %zu bytes to %s - total length is %zu\n", len,DEVICE_NAME, total_len);
++
++	if(len>UNIT_BUFF){
++		pr_err("Kernel log buffer is too small for a %zu bytes write\n",len);
++		return len;
++	}
++
++	int buff_offset = atomic_read(&buffer_num);
++	if(buff_offset==0){
++		offset = atomic_add_return(len,&total_len);
++	}else{
++		offset = atomic_add_return(len,&total_len2);
++	}
++
++	if(offset>LOG_BUFFER_SIZE && buff_offset==0){
++		atomic_set(&buffer_num,1);
++		atomic_set(&total_len,0);
++		offset = atomic_add_return(len,&total_len2);
++	}else if(offset>LOG_BUFFER_SIZE && buff_offset==1){
++		atomic_set(&buffer_num,0);
++		atomic_set(&total_len2,0);
++		offset = atomic_add_return(len,&total_len);
++	}
++
++	if (copy_from_user(buff_offset*LOG_BUFFER_SIZE+kernel_log_buf+offset-len, buff, len)) {
++		pr_err("Failed to copy data from user space\n");
++		return -EFAULT;
++	}
++
++	// for(int i=0;i<len;i++){
++	// 	printk(KERN_CONT "%c", ((char *)(buff_offset*LOG_BUFFER_SIZE+kernel_log_buf+offset-len))[i]);
++	// }
++	// printk(KERN_CONT "\n");
++
++		// pr_info("Log: %s \n",kernel_log_buf);
++		// pr_info("Addr offset: %p \n",kernel_log_buf);
++		// pr_info("Addr: %llx \n",buff_addr);
++		// pr_info("Len: %zu \n",total_len);
++
++	uint64_t full_addr = (uint64_t)(buff_offset*LOG_BUFFER_SIZE+kernel_log_buf+offset-len);
++	dcache_clean_inval_poc(full_addr, (full_addr+len));
++
++	phys_addr_t buff_addr = virt_to_phys((void *)full_addr);
++	rmi_os_switch_print(buff_addr,len);
++
++
++	return len;
++}
++
++// static ssize_t device_write(struct file *filp, const char __user *buff,
++// 			    size_t len, loff_t *off)
++// {
++// 	// pr_info("Write %zu bytes to %s - total length is %zu\n", len,DEVICE_NAME, total_len);
++//
++// 	if(total_len+len>LOG_BUFFER_SIZE){
++// 		pr_err("Kernel log buffer is too small - total lenght is %zu+%zu=%zu\n",total_len,len,total_len+len);
++// 		total_len=0;
++// 		counter=0;
++// 		return -EFAULT;
++// 	}
++//
++//
++// 	if (copy_from_user(kernel_log_buf+total_len, buff, len)) {
++// 		pr_err("Failed to copy data from user space\n");
++// 		return -EFAULT;
++// 	}
++//
++// 	total_len+=len;
++// 	counter++;
++//
++// 	if(counter==5){
++// 		// pr_info("Log: %s \n",kernel_log_buf);
++// 		// pr_info("Addr offset: %p \n",kernel_log_buf);
++// 		// pr_info("Addr: %llx \n",buff_addr);
++// 		// pr_info("Len: %zu \n",total_len);
++//
++// 		dcache_clean_inval_poc((uint64_t)kernel_log_buf, (uint64_t)(kernel_log_buf+total_len+1));
++//
++// 		phys_addr_t buff_addr = virt_to_phys(kernel_log_buf);
++// 		rmi_os_switch_print(buff_addr,total_len);
++//
++// 		counter=0;
++// 		total_len=0;
++// 	}
++//
++//
++// 	return len;
++// }
++
++module_init(chardev_init);
++module_exit(chardev_exit);
++
++MODULE_LICENSE("GPL");
+diff --git a/drivers/misc/os_switch/os_switch.c b/drivers/misc/os_switch/os_switch.c
+new file mode 100644
+index 000000000..b77b322b6
+--- /dev/null
++++ b/drivers/misc/os_switch/os_switch.c
+@@ -0,0 +1,105 @@
++#include <linux/atomic.h>
++#include <linux/cdev.h>
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/fs.h>
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/printk.h>
++#include <linux/types.h>
++#include <linux/version.h>
++
++#include <asm/errno.h>
++#include <asm/rmi_cmds.h>
++
++/*  Prototypes - this would normally go in a .h file */
++static int device_open(struct inode *, struct file *);
++static int device_release(struct inode *, struct file *);
++static ssize_t device_write(struct file *, const char __user *, size_t,
++                            loff_t *);
++
++#define DEVICE_NAME "osswitch" /* Dev name as it appears in /proc/devices   */
++
++/* Global variables are declared as static, so are global within the file. */
++
++static int major; /* major number assigned to our device driver */
++
++static struct class *cls;
++
++static struct file_operations chardev_fops = {
++    .write = device_write,
++    .open = device_open,
++    .release = device_release,
++};
++
++static char *chardev_devnode(const struct device *dev, umode_t *mode)
++{
++    if (mode != NULL)
++        *mode = 0222;
++    return NULL;
++}
++
++static int __init chardev_init(void)
++{
++    major = register_chrdev(0, DEVICE_NAME, &chardev_fops);
++
++    if (major < 0) {
++        pr_alert("Registering char device failed with %d\n", major);
++        return major;
++    }
++
++    pr_debug("%s was assigned major number %d.\n", DEVICE_NAME, major);
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
++    cls = class_create(DEVICE_NAME);
++#else
++    cls = class_create(THIS_MODULE, DEVICE_NAME);
++#endif
++    cls->devnode = &chardev_devnode;
++    device_create(cls, NULL, MKDEV(major, 0), NULL, DEVICE_NAME);
++
++    pr_debug("Device created on /dev/%s\n", DEVICE_NAME);
++
++    return 0;
++}
++
++static void __exit chardev_exit(void)
++{
++    device_destroy(cls, MKDEV(major, 0));
++    class_destroy(cls);
++
++    /* Unregister the device */
++    unregister_chrdev(major, DEVICE_NAME);
++}
++
++/* Methods */
++
++/* Called when a process tries to open the device file, like
++ * "sudo cat /dev/chardev"
++ */
++static int device_open(struct inode *inode, struct file *file)
++{
++    pr_info("Open device %s\n",DEVICE_NAME);
++    return 0;
++}
++
++/* Called when a process closes the device file. */
++static int device_release(struct inode *inode, struct file *file)
++{
++    pr_info("Device %s released\n",DEVICE_NAME);
++    return 0;
++}
++
++/* Called when a process writes to dev file: echo "hi" > /dev/hello */
++static ssize_t device_write(struct file *filp, const char __user *buff,
++                            size_t len, loff_t *off)
++{
++    pr_info("Write to %s\n", DEVICE_NAME);
++    rmi_os_switch();
++    return len;
++}
++
++module_init(chardev_init);
++module_exit(chardev_exit);
++
++MODULE_LICENSE("GPL");
+diff --git a/drivers/misc/unmap_trans/unmap_trans.c b/drivers/misc/unmap_trans/unmap_trans.c
+new file mode 100644
+index 000000000..25f8578fe
+--- /dev/null
++++ b/drivers/misc/unmap_trans/unmap_trans.c
+@@ -0,0 +1,591 @@
++#include "asm-generic/cacheflush.h"
++#include <linux/atomic.h>
++#include <linux/cdev.h>
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/fs.h>
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/printk.h>
++#include <linux/types.h>
++#include <linux/version.h>
++#include <linux/pagewalk.h>
++#include <asm/pgtable.h>
++#include <linux/mm.h>
++#include <asm/errno.h>
++
++extern struct mm_struct init_mm;
++pte_t **skipped_ptes;
++u64 skip_ptes_count;
++u64 skipped_sub_ptes_count;
++u64 tentative_in_list_read_only;
++u64 total_ptes_count;
++
++/*  Prototypes - this would normally go in a .h file */
++static int device_open(struct inode *, struct file *);
++static int device_release(struct inode *, struct file *);
++static ssize_t device_write(struct file *, const char __user *, size_t,
++                            loff_t *);
++
++#define DEVICE_NAME "unmap_trans" /* Dev name as it appears in /proc/devices   */
++#define MAX_PTE_LOOKUP 6
++#define MAX_PTE 5
++#define START_KERNEL 0xffff000000000000
++#define END_KERNEL 0xffffffffffffffff
++
++/* Global variables are declared as static, so are global within the file. */
++
++static int major; /* major number assigned to our device driver */
++
++static struct class *cls;
++
++static struct file_operations chardev_fops = {
++    .write = device_write,
++    .open = device_open,
++    .release = device_release,
++};
++
++static char *chardev_devnode(const struct device *dev, umode_t *mode)
++{
++    if (mode != NULL)
++        *mode = 0222;
++    return NULL;
++}
++
++static int __init chardev_init(void)
++{
++    major = register_chrdev(0, DEVICE_NAME, &chardev_fops);
++
++    if (major < 0) {
++        pr_alert("Registering char device failed with %d\n", major);
++        return major;
++    }
++
++    pr_debug("%s was assigned major number %d.\n", DEVICE_NAME, major);
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0)
++    cls = class_create(DEVICE_NAME);
++#else
++    cls = class_create(THIS_MODULE, DEVICE_NAME);
++#endif
++    cls->devnode = &chardev_devnode; 
++    device_create(cls, NULL, MKDEV(major, 0), NULL, DEVICE_NAME);
++
++    pr_debug("Device created on /dev/%s\n", DEVICE_NAME);
++
++    return 0;
++}
++
++static void __exit chardev_exit(void)
++{
++    device_destroy(cls, MKDEV(major, 0));
++    class_destroy(cls);
++
++    unregister_chrdev(major, DEVICE_NAME);
++}
++
++/* Methods */
++
++/* Called when a process tries to open the device file, like
++ * "sudo cat /dev/chardev"
++ */
++static int device_open(struct inode *inode, struct file *file)
++{
++    pr_info("Open device %s\n",DEVICE_NAME);
++    return 0;
++}
++
++/* Called when a process closes the device file. */
++static int device_release(struct inode *inode, struct file *file)
++{
++    pr_info("Device %s released\n",DEVICE_NAME);
++    return 0;
++}
++
++static void print_16_bytes(char* bytes){
++	for(int i=0;i<16;i++){
++		pr_cont("%02x",bytes[i]);
++	}
++	pr_info("");
++}
++
++
++// static void set_ptes_ro(pte_t *ptes[], size_t length){
++// 	for(int i=0;i<length;i++){
++// 		// pr_info("pte number %d",i);
++// 		// pr_info("swapper_pg_dir pte %d:\t\t%llx",i,ptes[i]->pte);
++// 		// pr_info("swapper_pg_dir ptr %d:\t\t%lx",i,(unsigned long)ptes[i]);
++// 		int index_next = (i < length-1) ? (i + 1) : i; // If this is the last ptes, then it is pointing on itself, so you want to check if the same pte is read-only
++// 		// pr_info("Is %d:%d read-only? %d",i,index_next,pte_rdonly(*ptes[index_next]));
++// 		if(!pte_rdonly(*ptes[index_next])){
++// 			__set_pte(ptes[i], pte_wrprotect(*ptes[i]));
++// 		}
++// 		else if(!pte_rdonly(*ptes[i])){
++// 			pr_err("Need to exit here. It means that we cannot modify a non-read-only pte (%lx) because its pte (%lx) is read-only.",(unsigned long)ptes[i],(unsigned long)ptes[index_next]);
++// 		}
++// 		else{
++// 			pr_info("Skip pte, already read-only");
++// 		}
++// 	}
++// 	flush_tlb_all();
++// }
++
++// static void set_ptes_ro(pte_t *current_pte,pte_t *next_pte){
++// 	// __set_pte_nosync(current_pte, pte_wrprotect(*current_pte));
++// 	total_ptes_count++;
++// 	if(check_list(current_pte)){
++// 		tentative_in_list_read_only++;
++// 		return;
++// 	}
++// 	if(!pte_rdonly(*next_pte)){
++// 		// __set_pte_nosync(current_pte, pte_wrprotect(*current_pte));
++// 		skipped_ptes[skip_ptes_count]=current_pte;
++// 		skip_ptes_count++;
++// 		// skipped_sub_ptes_count++;
++// 		if(skip_ptes_count>=10000){
++// 			pr_err("Overflow of skip_ptes_count");
++// 			skip_ptes_count=0;
++// 		}
++// 		return;
++// 	}
++//
++// 	if(check_list(next_pte)){
++// 		skipped_sub_ptes_count++;
++// 		return;
++// 	}
++//
++// 	// if(check_list(current_pte)){
++// 	// 	tentative_in_list_read_only++;
++// 	// 	return;
++// 	// }
++//
++// 	if(!pte_rdonly(*current_pte)){
++// 		pr_err("Need to exit here. It means that we cannot modify a non-read-only pte (%lx) because its pte (%lx) is read-only.",(unsigned long)current_pte,(unsigned long)next_pte);
++// 		// skipped_ptes[skip_ptes_count]=next_pte;
++// 		// skip_ptes_count++;
++// 		// skipped_sub_ptes_count++;
++// 		// if(skip_ptes_count>=10){
++// 		// 	pr_err("Overflow of skip_ptes_count");
++// 		// 	skip_ptes_count=0;
++// 		// }
++// 		// __set_pte(next_pte, pte_mkwrite_novma(*next_pte));
++// 		// flush_tlb_all();
++// 		// flush_cache_vmap((unsigned long)next_pte-1, (unsigned long)next_pte+1);
++// 		// __set_pte_nosync(current_pte, pte_wrprotect(*current_pte));
++// 	}
++// }
++
++static int check_list(pte_t *pte){
++	for(int i=0;i<skip_ptes_count;i++){
++		if(skipped_ptes[i] == pte){
++			return 1;
++		}
++	}
++	return 0;
++}
++
++static void save_ptes(pte_t *current_pte,pte_t *next_pte){
++	// __set_pte_nosync(current_pte, pte_wrprotect(*current_pte));
++	total_ptes_count++;
++	if(check_list(current_pte)){
++		tentative_in_list_read_only++;
++		return;
++	}
++	if(!pte_rdonly(*next_pte)){
++		skipped_ptes[skip_ptes_count]=current_pte;
++		skip_ptes_count++;
++		// skipped_sub_ptes_count++;
++		if(skip_ptes_count>=2000){
++			pr_err("Overflow of skip_ptes_count");
++			skip_ptes_count=0;
++		}
++		return;
++	}else{
++		pr_err("No adding pte %lx that we cannot modify",(unsigned long)current_pte);
++	}
++}
++
++static int get_ptes(unsigned long vaddr){
++	pte_t *current_pte = virt_to_kpte(vaddr);
++	pte_t *next_pte = virt_to_kpte((unsigned long)current_pte);
++	// set_ptes_ro(current_pte, next_pte);
++	save_ptes(current_pte, next_pte);
++	if((unsigned long)current_pte==(unsigned long)next_pte){
++		return 1;
++	}
++	for(int i=1;i<MAX_PTE_LOOKUP;i++){
++		current_pte = next_pte;
++		next_pte = virt_to_kpte((unsigned long)current_pte);
++		// set_ptes_ro(current_pte, next_pte);
++		save_ptes(current_pte, next_pte);
++		if((unsigned long)next_pte==(unsigned long)current_pte){
++			return i+1;
++		}
++	}
++	pr_err("Reached %d pte of pte, maximum should be 5\n",MAX_PTE_LOOKUP);
++	return -EINVAL;
++}
++
++
++static int pteunmap_pgd_entry(pgd_t *pgd, unsigned long addr,
++			    unsigned long next, struct mm_walk *walk)
++{
++	// pte_t *pte = virt_to_kpte((unsigned long) pgd);
++	// pte_t *pte_test = virt_to_kpte((unsigned long) addr);
++	// pr_info("pgd ptr = %lx, addr = %lx",(unsigned long)pgd,addr);
++	// pr_info("pgd pte ptr = %lx, value = %llx",(unsigned long)pte,pte->pte);
++	// if(pte_test != NULL){
++	// 	pr_info("addr pte ptr = %lx, value = %llx",(unsigned long)pte_test,pte_test->pte);
++	// }
++	// pte_t **ptes = kmalloc(MAX_PTE*sizeof(pte_t *), GFP_KERNEL);
++	int num_sub_ptes = get_ptes((unsigned long)pgd);
++	// pr_info("PGD: Found %d sub ptes",num_sub_ptes);
++	// set_ptes_ro(ptes,num_sub_ptes);
++	// kfree(ptes);
++	// pr_info("--------------------------------------");
++	return 0;
++}
++
++static int pteunmap_p4d_entry(p4d_t *p4d, unsigned long addr,
++			    unsigned long next, struct mm_walk *walk)
++{
++	// pte_t *pte = virt_to_kpte((unsigned long) p4d);
++	// pte_t *pte_test = virt_to_kpte((unsigned long) addr);
++	// pr_info("p4d ptr = %lx, addr = %lx",(unsigned long)p4d,addr);
++	// pr_info("p4d pte ptr = %lx, value = %llx",(unsigned long)pte,pte->pte);
++	// if(pte_test != NULL){
++	// 	pr_info("addr pte ptr = %lx, value = %llx",(unsigned long)pte_test,pte_test->pte);
++	// }
++	// pte_t **ptes = kmalloc(MAX_PTE*sizeof(pte_t *), GFP_KERNEL);
++	int num_sub_ptes = get_ptes((unsigned long)p4d);
++	// pr_info("P4D: Found %d sub ptes",num_sub_ptes);
++
++	// kfree(ptes);
++	// pr_info("--------------------------------------");
++	return 0;
++}
++
++static int pteunmap_pud_entry(pud_t *pud, unsigned long addr,
++			    unsigned long next, struct mm_walk *walk)
++{
++	// pte_t *pte = virt_to_kpte((unsigned long) pud);
++	// pr_info("pud ptr = %lx, addr = %lx",(unsigned long)pud,addr);
++	// pr_info("pud pte ptr = %lx, value = %llx",(unsigned long)pte,pte->pte);
++	// pte_t **ptes = kmalloc(MAX_PTE*sizeof(pte_t *), GFP_KERNEL);
++	int num_sub_ptes = get_ptes((unsigned long)pud);
++	// pr_info("PUD: Found %d sub ptes",num_sub_ptes);
++	// set_ptes_ro(ptes,num_sub_ptes);
++	// kfree(ptes);
++	// pr_info("--------------------------------------");
++	return 0;
++}
++
++static int pteunmap_pmd_entry(pmd_t *pmd, unsigned long addr,
++			    unsigned long next, struct mm_walk *walk)
++{
++	// pr_info("pmd pte = %lx, addr = %lx",(unsigned long)pmd,addr);
++	// pte_t *pte = virt_to_kpte((unsigned long) pmd);
++	// pr_info("pmd ptr = %lx, addr = %lx",(unsigned long)pmd,addr);
++	// pr_info("pmd pte ptr = %lx, value = %llx",(unsigned long)pte,pte->pte);
++	// pte_t **ptes = kmalloc(MAX_PTE*sizeof(pte_t *), GFP_KERNEL);
++	int num_sub_ptes = get_ptes((unsigned long)pmd);
++	// pr_info("PMD: Found %d sub ptes",num_sub_ptes);
++	// set_ptes_ro(ptes,num_sub_ptes);
++	// kfree(ptes);
++	// pr_info("--------------------------------------");
++	return 0;
++}
++
++static int pteunmap_pte_entry(pte_t *pte, unsigned long addr,
++			    unsigned long next, struct mm_walk *walk)
++{
++	// pr_info("pte pte = %lx, addr = %lx",(unsigned long)pte,addr);
++	// pte_t *pte_of_pte = virt_to_kpte((unsigned long) pte);
++	// pr_info("pte ptr = %lx, addr = %lx",(unsigned long)pte_of_pte,addr);
++	// pr_info("pte pte ptr = %lx, value = %llx",(unsigned long)pte_of_pte,pte_of_pte->pte);
++	// pte_t **ptes = kmalloc(MAX_PTE*sizeof(pte_t *), GFP_KERNEL);
++	int num_sub_ptes = get_ptes((unsigned long)pte);
++	// pr_info("PTE: Found %d sub ptes",num_sub_ptes);
++	// set_ptes_ro(ptes,num_sub_ptes);
++	// kfree(ptes);
++	// pr_info("--------------------------------------");
++	return 0;
++}
++
++static int pteunmap_hole(unsigned long addr, unsigned long next,
++		       int depth, struct mm_walk *walk)
++{
++	// pr_info("hole addr = %lx",addr);
++	return 0;
++}
++
++static const struct mm_walk_ops pteunmap_ops = {
++	.pgd_entry	= pteunmap_pgd_entry,
++	.p4d_entry	= pteunmap_p4d_entry,
++	.pud_entry	= pteunmap_pud_entry,
++	.pmd_entry	= pteunmap_pmd_entry,
++	.pte_entry	= pteunmap_pte_entry,
++	.pte_hole	= pteunmap_hole,
++};
++
++// static pte_t pte_save;
++// static void * pte_save_addr;
++// static int count=0;
++static ssize_t device_write(struct file *filp, const char __user *buff,
++			    size_t len, loff_t *off)
++{
++	pr_info("Write to %s\n", DEVICE_NAME);
++
++	// char kernel_buff[8];
++	// size_t max_copy_len = min(len, sizeof(kernel_buff) - 1);
++	//
++	// if (copy_from_user(kernel_buff, buff, max_copy_len)) {
++	// 	pr_err("Failed to copy data from user space\n");
++	// 	return -EFAULT;
++	// }
++	
++	pr_info("start code: \t%lx and %llx",init_mm.start_code,virt_to_phys((void *)init_mm.start_code));
++	pr_info("end code: \t%lx",init_mm.end_code);
++	pr_info("start data: \t%lx",init_mm.start_data);
++	pr_info("end data: \t%lx",init_mm.end_data);
++	pr_info("start brk: \t%lx",init_mm.start_brk);
++	pr_info("brk: \t\t%lx",init_mm.brk);
++	pr_info("");
++	pr_info("swapper_pg_dir ptr:\t\t%lx",(unsigned long)swapper_pg_dir);
++	pr_info("swapper_pg_dir ptr phys:\t\t%lx",(unsigned long)virt_to_phys(swapper_pg_dir));
++	pr_info("swapper_pg_dir:\t\t%llx",swapper_pg_dir[0].pgd);
++
++	unsigned long ttbr0_el1, ttbr0_el12 = 0, ttbr0_el2;
++	unsigned long ttbr1_el1, ttbr1_el12 = 0, ttbr1_el2 = 0;
++	asm volatile("mrs %0, ttbr0_el1" : "=r"(ttbr0_el1));
++	// asm volatile("mrs %0, ttbr0_el12" : "=r"(ttbr0_el12));
++	asm volatile("mrs %0, ttbr0_el2" : "=r"(ttbr0_el2));
++	asm volatile("mrs %0, ttbr1_el1" : "=r"(ttbr1_el1));
++	// asm volatile("mrs %0, ttbr1_el12" : "=r"(ttbr1_el12));
++	// asm volatile("mrs %0, ttbr1_el2" : "=r"(ttbr1_el2));
++
++	printk(KERN_INFO "TTBR0_EL1: 0x%lx\n", ttbr0_el1);
++	printk(KERN_INFO "TTBR0_EL12: 0x%lx\n", ttbr0_el12);
++	printk(KERN_INFO "TTBR0_EL2: 0x%lx\n", ttbr0_el2);
++	printk(KERN_INFO "TTBR1_EL1: 0x%lx\n", ttbr1_el1);
++	printk(KERN_INFO "TTBR1_EL12: 0x%lx\n", ttbr1_el12);
++	printk(KERN_INFO "TTBR1_EL2: 0x%lx\n", ttbr1_el2);
++
++	skipped_ptes = kmalloc(2000*sizeof(pte_t *), GFP_KERNEL);
++	// skipped_ptes = kmalloc(10*sizeof(pte_t *), GFP_KERNEL);
++	skip_ptes_count=0;
++	skipped_sub_ptes_count=0;
++	tentative_in_list_read_only=0;
++	total_ptes_count=0;
++	pr_info("Start walk");
++	mmap_write_lock(&init_mm);
++	walk_page_range_novma(&init_mm, START_KERNEL, END_KERNEL, &pteunmap_ops, swapper_pg_dir, NULL);
++	mmap_write_unlock(&init_mm);
++	pr_info("End walk: skipped sub ptes %llu/%llu. Tried to set the pte of the list ro again %llu. Total pte modified %llu",skipped_sub_ptes_count,total_ptes_count,tentative_in_list_read_only,skip_ptes_count);
++	flush_tlb_all();
++	for(int i=skip_ptes_count-1;i>=0;i--){
++		// __set_pte(skipped_ptes[i], pte_mkwrite_novma(*skipped_ptes[i]));
++		__set_pte_nosync(skipped_ptes[i], *skipped_ptes[i]);
++	}
++	dsb(ishst);
++	isb();
++	for(int i=skip_ptes_count-1;i>=0;i--){
++		// if(i%100==0){pr_info("Done with %d",i);}
++		__set_pte_nosync(skipped_ptes[i], pte_wrprotect(*skipped_ptes[i]));
++	}
++	dsb(ishst);
++	isb();
++	flush_tlb_all();
++
++	// Cannot be freed because the whole memory is read-only
++	// kfree(skipped_ptes);
++	
++	
++	// pte_t **ptes = kmalloc(MAX_PTE*sizeof(pte_t *), GFP_KERNEL);
++	// int ret = get_ptes((unsigned long)swapper_pg_dir, ptes);
++	// if(ret<0){return ret;}
++	// set_ptes_ro(ptes, ret);
++
++	// pte_t *pgdir_pte = virt_to_kpte((unsigned long)swapper_pg_dir);
++	// pr_info("swapper_pg_dir pte:\t\t%lx",(unsigned long)pgdir_pte);
++	// pr_info("swapper_pg_dir pte:\t\t%llx",pgdir_pte->pte);
++	// pte_t *pgdir_pte2 = virt_to_kpte((unsigned long)pgdir_pte);
++	// pr_info("swapper_pg_dir2 pte:\t\t%lx",(unsigned long)pgdir_pte2);
++	// pr_info("swapper_pg_dir2 pte:\t\t%llx",pgdir_pte2->pte);
++	// pte_t *pgdir_pte3 = virt_to_kpte((unsigned long)pgdir_pte2);
++	// pr_info("swapper_pg_dir3 pte:\t\t%lx",(unsigned long)pgdir_pte3);
++	// pr_info("swapper_pg_dir3 pte:\t\t%llx",pgdir_pte3->pte);
++	// pte_t *pgdir_pte4 = virt_to_kpte((unsigned long)pgdir_pte3);
++	// pr_info("swapper_pg_dir4 pte:\t\t%lx",(unsigned long)pgdir_pte4);
++	// pr_info("swapper_pg_dir4 pte:\t\t%llx",pgdir_pte4->pte);
++	// pte_t *pgdir_pte5 = virt_to_kpte((unsigned long)pgdir_pte4);
++	// pr_info("swapper_pg_dir5 pte:\t\t%lx",(unsigned long)pgdir_pte5);
++	// pr_info("swapper_pg_dir5 pte:\t\t%llx",pgdir_pte4->pte);
++	// pte_t *pgdir_pte6 = virt_to_kpte((unsigned long)pgdir_pte5);
++	// pr_info("swapper_pg_dir6 pte:\t\t%lx",(unsigned long)pgdir_pte6);
++	// pr_info("swapper_pg_dir6 pte:\t\t%llx",pgdir_pte6->pte);
++	// __set_pte(pgdir_pte, pte_wrprotect(*pgdir_pte));
++	// __set_pte(pgdir_pte2, pte_wrprotect(*pgdir_pte2));
++	// __set_pte(pgdir_pte3, pte_wrprotect(*pgdir_pte3));
++	// __set_pte(pgdir_pte4, pte_wrprotect(*pgdir_pte4));
++	// __set_pte(pgdir_pte5, pte_wrprotect(*pgdir_pte5));
++	// flush_tlb_all();
++	// __set_pte(pgdir_pte6, pte_mkwrite_novma(*pgdir_pte6));
++	// flush_tlb_all();
++	// swapper_pg_dir[0].pgd = 0;
++
++	pr_info("\n");
++
++	// print_16_bytes((char *)init_mm.start_code);
++	// print_16_bytes((char *)init_mm.end_code);
++	// // print_16_bytes((char *)init_mm.start_data);
++	// print_16_bytes((char *)init_mm.end_data);
++	// // print_16_bytes((char *)init_mm.start_brk);
++	// // print_16_bytes((char *)init_mm.brk);
++	//
++	// pte_t *pte_start = virt_to_kpte(init_mm.start_code);
++	// pr_info("%lx: pte start ptr: \t%lx and %llx",init_mm.start_code,(unsigned long)pte_start,virt_to_phys(pte_start));
++	// pr_info("pte of the pte: \t%llx",pte_start->pte);
++
++	// for(unsigned long start=init_mm.start_code;start<init_mm.end_code;start+=0x1000){
++	// 	pte_t *pte_base = virt_to_kpte(start);
++	// 	pte_t *pte_up = virt_to_kpte((unsigned long)pte_base);
++	// 	pr_info("%lx: pte start ptr: \t%lx and %llx",start,(unsigned long)pte_base,virt_to_phys(pte_base));
++	// 	pr_info("pte_base value: \t\t%llx and read-only=%d",pte_base->pte,pte_rdonly(*pte_base));
++	// 	pr_info("pte_up value: \t\t%llx and read-only=%d",pte_up->pte,pte_rdonly(*pte_up));
++	// 	// pte_clear(&init_mm, pte_start->pte, pte_base);
++	// 	__set_pte(pte_base, pte_wrprotect(*pte_base));
++	// 	pr_info("pte_base value: \t\t%llx and read-only=%d",pte_base->pte,pte_rdonly(*pte_base));
++	// 	pr_info("-----------------------------------");
++	// }
++		
++
++	// pr_info("pte start ptr: \t%lx and %llx",(unsigned long)pte_start,virt_to_phys(pte_start));
++	// pr_info("pte start 2 ptr: \t%lx and %llx",(unsigned long)pte_start2,virt_to_phys(pte_start2));
++	// pr_info("pte start: \t%llx",*pte_start);
++
++	// pte_t *pte_of_the_pte = virt_to_kpte((unsigned long)pte_start);
++	// if (count==0){
++	// 	pr_info("pte of the pte ptr: \t%lx and %llx",(unsigned long)pte_of_the_pte,virt_to_phys(pte_of_the_pte));
++	// 	pr_info("pte of the pte: \t%llx",pte_of_the_pte->pte);
++	// 	pte_t *pte_of_the_pte2 = virt_to_kpte((unsigned long)pte_of_the_pte);
++	// 	pr_info("pte of the pte 2 ptr: \t%lx",(unsigned long)pte_of_the_pte2);
++	// 	pr_info("pte of the pte 2: \t%llx",pte_of_the_pte2->pte);
++	// 	pte_t *pte_of_the_pte3 = virt_to_kpte((unsigned long)pte_of_the_pte2);
++	// 	pr_info("pte of the pte 3 ptr: \t%lx",(unsigned long)pte_of_the_pte3);
++	// 	pr_info("pte of the pte 3: \t%llx",pte_of_the_pte3->pte);
++	// 	pte_t *pte_of_the_pte4 = virt_to_kpte((unsigned long)pte_of_the_pte3);
++	// 	pr_info("pte of the pte 4 ptr: \t%lx",(unsigned long)pte_of_the_pte4);
++	// 	pr_info("pte of the pte 4: \t%llx",pte_of_the_pte4->pte);
++	// 	pte_t *pte_of_the_pte5 = virt_to_kpte((unsigned long)pte_of_the_pte4);
++	// 	pr_info("pte of the pte 5 ptr: \t%lx",(unsigned long)pte_of_the_pte5);
++	// 	pr_info("pte of the pte 5: \t%llx",pte_of_the_pte5->pte);
++	// 	pte_t *pte_of_the_pte6 = virt_to_kpte((unsigned long)pte_of_the_pte5);
++	// 	pr_info("pte of the pte 6 ptr: \t%lx",(unsigned long)pte_of_the_pte6);
++	// 	pr_info("pte of the pte 6: \t%llx",pte_of_the_pte6->pte);
++	// 	pte_t *pte_of_the_pte7 = virt_to_kpte((unsigned long)pte_of_the_pte6);
++	// 	pr_info("pte of the pte 7 ptr: \t%lx",(unsigned long)pte_of_the_pte7);
++	// 	pr_info("pte of the pte 7: \t%llx",pte_of_the_pte7->pte);
++	// 	// pgd_t *pgd = pgd_offset_k(pte_of_the_pte->pte);
++	// 	// pr_info("pgd: \t%llx",pgd->pgd);
++	// 	// p4d_t *p4d = p4d_offset(pgd,pte_of_the_pte->pte);
++	// 	// pr_info("p4d: \t%llx",p4d->p4d);
++	// 	// pud_t *pud = pud_offset(p4d,pte_of_the_pte->pte);
++	// 	// pr_info("pud: \t%llx",pud->pud);
++	// 	// pmd_t *pmd = pmd_offset(pud,pte_of_the_pte->pte);
++	// 	// pr_info("pmd: \t%llx",pmd->pmd);
++	// 	pr_info("Initial pte");
++	// 	pgd_t *pgd2 = pgd_offset_k(pte_start->pte);
++	// 	pr_info("pgd2 ptr: \t%lx",(unsigned long)pgd2);
++	// 	pr_info("pgd2: \t%llx",pgd2->pgd);
++	// 	p4d_t *p4d2 = p4d_offset(pgd2,pte_start->pte);
++	// 	pr_info("p4d2 ptr: \t%lx",(unsigned long)p4d2);
++	// 	pr_info("p4d2: \t%llx",p4d2->p4d);
++	// 	pud_t *pud2 = pud_offset(p4d2,pte_start->pte);
++	// 	pr_info("pud2 ptr: \t%lx",(unsigned long)pud2);
++	// 	pr_info("pud2: \t%llx",pud2->pud);
++	// 	pmd_t *pmd2 = pmd_offset(pud2,pte_start->pte);
++	// 	pr_info("pmd2 ptr: \t%lx",(unsigned long)pmd2);
++	// 	pr_info("pmd2: \t%llx",pmd2->pmd);
++	// 	pr_info("Code");
++	// 	pgd_t *pgd3 = pgd_offset_k(init_mm.start_code);
++	// 	pr_info("pgd3 ptr: \t%lx",(unsigned long)pgd3);
++	// 	pr_info("pgd3: \t%llx",pgd3->pgd);
++	// 	p4d_t *p4d3 = p4d_offset(pgd3,init_mm.start_code);
++	// 	pr_info("p4d3 ptr: \t%lx",(unsigned long)p4d3);
++	// 	pr_info("p4d3: \t%llx",p4d3->p4d);
++	// 	pud_t *pud3 = pud_offset(p4d3,init_mm.start_code);
++	// 	pr_info("pud3 ptr: \t%lx",(unsigned long)pud3);
++	// 	pr_info("pud3: \t%llx",pud3->pud);
++	// 	pmd_t *pmd3 = pmd_offset(pud3,init_mm.start_code);
++	// 	pr_info("pmd3 ptr: \t%lx",(unsigned long)pmd3);
++	// 	pr_info("pmd3: \t%llx",pmd3->pmd);
++	//
++	// 	// // pte_save=*pte_of_the_pte;pte_save_addr=pte_of_the_pte;
++	// 	// pte_save=*pte_of_the_pte7;pte_save_addr=pte_of_the_pte7;
++	// 	// count++;
++	// 	// // pte_clear(&init_mm, (unsigned long)pte_start, pte_of_the_pte);
++	// 	// // pte_clear(&init_mm, (unsigned long)pte_of_the_pte, pte_of_the_pte);
++	// 	// pte_clear(&init_mm, (unsigned long)pte_of_the_pte7, pte_of_the_pte7);
++	// 	// flush_tlb_all();
++	// 	// // pr_info("pte start: \t%llx",pte_start->pte);
++	// 	// // pr_info("pte of the pte 3: \t%llx",pte_of_the_pte3->pte);
++	// 	// pr_info("pte of the pte 2: \t%llx",pte_of_the_pte2->pte);
++	// 	// pr_info("pte of the pte: \t%llx",pte_of_the_pte->pte);
++	// 	// pr_info("pte start: \t%llx",pte_start->pte);
++	// 	// pr_info("start code: \t%lx and %llx",init_mm.start_code,virt_to_phys((void *)init_mm.start_code));
++	// 	// print_16_bytes((char *)init_mm.start_code);
++	// }else{
++	// 	pr_info("Loading old pte");
++	// 	// __set_pte(pte_of_the_pte, pte_save);
++	// 	__set_pte(pte_save_addr, pte_save);
++	// 	flush_tlb_all();
++	// 	pr_info("pte start: \t%llx",pte_start->pte);
++	// 	pr_info("pte of the pte 7: \t%llx",((pte_t *)pte_save_addr)->pte);
++	// }
++
++	// pr_info("pte start ptr: \t%lx",(unsigned long)pte_start);
++	// Next line is not working if we clear the pte
++	// pr_info("pte start: \t%llx",*pte_start);
++	
++	// *pte_start=pte_mkwrite_novma(*pte_start);
++	// *pte_start=pte_mkdirty(*pte_start);
++	// __set_pte(pte_start, pte_mkwrite_novma(*pte_start));
++	// flush_tlb_all();
++	// pr_info("pte start: \t%llx",*pte_start);
++	// pr_info("");
++
++	// ((char *)init_mm.end_code)[5] = 0xa;
++	// ((char *)init_mm.end_code)[6] = 0xa;
++	// ((char *)init_mm.end_code)[7] = 0xa;
++	// print_16_bytes((char *)init_mm.end_code);
++
++	// The following writes work
++	// ((char *)init_mm.end_data)[5] = 0xa;
++	// ((char *)init_mm.end_data)[6] = 0xa;
++	// ((char *)init_mm.end_data)[7] = 0xa;
++	// print_16_bytes((char *)init_mm.end_data);
++
++	// ((char *)init_mm.start_code)[5] = 0xa;
++	// ((char *)init_mm.start_code)[6] = 0xa;
++	// ((char *)init_mm.start_code)[7] = 0xa;
++	// print_16_bytes((char *)init_mm.start_code);
++	
++	// pte_t *pte_of_the_pte = virt_to_kpte((unsigned long)pte_start);
++	// pr_info("pte of the pte ptr: \t%lx",(unsigned long)pte_of_the_pte);
++	// pr_info("pte of the pte: \t%llx",*pte_of_the_pte);
++	//
++	// pte_t *pte_of_the_pte_of_the_pte = virt_to_kpte((unsigned long)pte_of_the_pte);
++	// pr_info("pte of the pte of the pte ptr: \t%lx",(unsigned long)pte_of_the_pte_of_the_pte);
++	// pr_info("pte of the pte of the pte: \t%llx",*pte_of_the_pte_of_the_pte);
++	//
++	// pte_t *pte_of_the_pte_of_the_pte_of_the_pte = virt_to_kpte((unsigned long)pte_of_the_pte_of_the_pte);
++	// pr_info("pte of the pte of the pte of the pte ptr: \t%lx",(unsigned long)pte_of_the_pte_of_the_pte_of_the_pte);
++	// pr_info("pte of the pte of the pte of the pte: \t%llx",*pte_of_the_pte_of_the_pte_of_the_pte);
++	return len;
++}
++
++module_init(chardev_init);
++module_exit(chardev_exit);
++
++MODULE_LICENSE("GPL");
+diff --git a/drivers/of/of_reserved_mem.c b/drivers/of/of_reserved_mem.c
+index 75e819f66..e243af72a 100644
+--- a/drivers/of/of_reserved_mem.c
++++ b/drivers/of/of_reserved_mem.c
+@@ -309,6 +309,10 @@ int __init fdt_scan_reserved_mem(void)
+ 
+ 		uname = fdt_get_name(fdt, child, NULL);
+ 
++		if(!fdt_node_check_compatible(fdt, child, "linux")){
++			continue;
++		}
++
+ 		err = __reserved_mem_reserve_reg(child, uname);
+ 		if (!err)
+ 			count++;
+-- 
+2.56.0
+

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote
+    name="kernkonzept"
+    fetch="https://github.com/kernkonzept/"
+  />
+  <remote
+    name="cokemon"
+    fetch="https://github.com/CoKeMon-SECTRS/"
+  />
+
+  <default
+    revision="master"
+    remote="kernkonzept"
+  />
+
+  <!-- CoKeMon L4 repo (mk build system + modified packages: bootstrap, io, drivers-frst, osswitch) -->
+  <project name="L4" path="l4" remote="cokemon" revision="qemu-emmc" />
+
+  <!-- CoKeMon Fiasco (GIC interrupt restore after OS switch) -->
+  <project name="Fiasco" path="fiasco" remote="cokemon" revision="qemu-emmc" />
+
+  <!-- Unmodified packages from Kernkonzept -->
+  <project name="acpica" path="l4/pkg/acpica" />
+  <project name="ada" path="l4/pkg/ada" />
+  <project name="ahci-driver" path="l4/pkg/ahci-driver" />
+  <project name="atkins" path="l4/pkg/atkins" />
+  <project name="cons" path="l4/pkg/cons" />
+  <project name="emmc-driver" path="l4/pkg/emmc-driver" />
+  <project name="gnu-efi" path="l4/pkg/gnu-efi" />
+  <project name="hello" path="l4/pkg/hello" />
+  <project name="l4_virtio-net-switch" path="l4/pkg/virtio-net-switch" />
+  <project name="l4re-core" path="l4/pkg/l4re-core" />
+  <project name="l4virtio" path="l4/pkg/l4virtio" />
+  <project name="libblock-device" path="l4/pkg/libblock-device" />
+  <project name="libfdt" path="l4/pkg/libfdt" />
+  <project name="libvcpu" path="l4/pkg/libvcpu" />
+  <project name="nvme-driver" path="l4/pkg/nvme-driver" />
+  <project name="readline" path="l4/pkg/readline" />
+  <project name="rtc" path="l4/pkg/rtc" />
+  <project name="tinit" path="l4/pkg/tinit" />
+  <project name="tvmm" path="l4/pkg/tvmm" />
+  <project name="uvmm" path="l4/pkg/uvmm" />
+  <project name="virtio-net" path="l4/pkg/virtio-net" />
+  <project name="zlib" path="l4/pkg/zlib" />
+</manifest>
