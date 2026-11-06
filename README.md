@@ -51,22 +51,18 @@ $ROOT/
 ## 1. Set up the Linaro CCA base system
 
 This project is built on top of the Linaro OP-TEE QEMU v8 CCA reference stack.
-The original Linaro CCA build instructions were at
+The original Linaro CCA build instructions are at
 [gitlab.com/Linaro/cca-public/build-instructions](https://gitlab.com/Linaro/cca-public/build-instructions).
 
-> **Note:** The original manifest was hosted on `git.codelinaro.org` (branch
-> `cca/v7`), which is no longer publicly accessible. The original repo manifest
-> files are preserved in this repository as `qemu_v8_cca.xml` and `common.xml`
-> for reference. The `repo init` and `repo sync` commands below will only work
-> if `git.codelinaro.org` becomes available again or if you mirror the affected
-> repos (build, TF-A, RMM, buildroot-external-cca) to an accessible location
-> and update the manifest URLs accordingly.
+This repository includes updated `repo` manifest files (`qemu_v8_cca.xml` and
+`common.xml`) that mirror the repos originally hosted on `git.codelinaro.org`
+(no longer publicly accessible) to the CoKeMon-SECTRS GitHub organization.
 
 ```bash
 # From $ROOT
+git clone <this-repo-url> qemu-setup-instructions
 mkdir cca && cd cca
-repo init -u https://git.codelinaro.org/linaro/dcap/op-tee-4.2.0/manifest.git \
-    -b cca/v7 -m qemu_v8_cca.xml
+repo init -u $ROOT/qemu-setup-instructions -m qemu_v8_cca.xml
 repo sync -j$(nproc)
 cd ..
 ```
@@ -76,9 +72,9 @@ The key versions pulled by this manifest are:
 
 | Component | Source | Revision |
 |-----------|--------|----------|
-| Build system | `git.codelinaro.org/linaro/dcap/op-tee-4.2.0/build.git` | `cca/v5` |
-| TF-A | `git.codelinaro.org/linaro/dcap/TF-A/trusted-firmware-a.git` | `cca/v4` |
-| RMM | `git.codelinaro.org/linaro/dcap/rmm` | `cca/v4` |
+| Build system | `github.com/CoKeMon-SECTRS/qemu-cca-build` | `main` |
+| TF-A | `github.com/CoKeMon-SECTRS/qemu-cca-trusted-firmware-a` | `main` |
+| RMM | `github.com/CoKeMon-SECTRS/qemu-cca-rmm` | `main` |
 | Linux | `git.gitlab.arm.com/linux-arm/linux-cca` | `cca-host/v7` |
 | QEMU | `github.com/qemu/qemu.git` | `stable-9.2` |
 | Buildroot | `github.com/buildroot/buildroot.git` | `2024.08` |
@@ -87,12 +83,10 @@ The key versions pulled by this manifest are:
 
 ## 2. Apply patches to Linux, TF-A, and the build system
 
-Clone this repository and apply the CoKeMon patches on top of the Linaro repos:
+Apply the CoKeMon patches on top of the Linaro repos:
 
 ```bash
 # From $ROOT
-git clone <this-repo-url> qemu-setup-instructions
-
 cd cca/trusted-firmware-a
 git am ../../qemu-setup-instructions/patches/0001-CoKeMon-Modifications-for-TF-A-with-QEMU.patch
 cd ..
@@ -228,7 +222,7 @@ dd if=/dev/zero of=cca/fake-disk/log.img bs=512 seek=2048 count=20 conv=notrunc
 ```
 qemu-setup-instructions/
 ├── README.md                 # This file
-├── qemu_v8_cca.xml           # Original Linaro CCA repo manifest
+├── qemu_v8_cca.xml           # Linaro CCA repo manifest (CoKeMon-SECTRS mirrors)
 ├── common.xml                # Shared manifest (included by qemu_v8_cca.xml)
 ├── manifest.xml              # Custom ham manifest for L4Re + Fiasco
 ├── read.sh                   # Script to read logged data from the disk image

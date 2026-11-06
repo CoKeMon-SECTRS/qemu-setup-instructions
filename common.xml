@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <manifest>
         <remote name="github" fetch="https://github.com" />
-        <remote name="clo"    fetch="https://git.codelinaro.org/linaro/dcap" />
+        <remote name="cokemon" fetch="https://github.com/CoKeMon-SECTRS" />
         <default remote="github" revision="master" />
 
         <!-- OP-TEE gits -->
@@ -17,5 +17,6 @@
         <!-- buildroot git -->
         <project path="buildroot"            name="buildroot/buildroot.git"               revision="refs/tags/2024.08" clone-depth="1" />
 
-        <project path="buildroot-external-cca" name="buildroot-external-cca.git"             revision="9f5e19c1727b41ff390f161db02f7a4d067ede4f" remote="clo" clone-depth="1" />
+        <!-- Mirror: originally from git.codelinaro.org/linaro/dcap -->
+        <project path="buildroot-external-cca" name="qemu-buildroot-external-cca" remote="cokemon" revision="main" clone-depth="1" />
 </manifest>
