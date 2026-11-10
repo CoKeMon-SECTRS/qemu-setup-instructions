@@ -22,18 +22,18 @@ export PATH="$HOME/.local/bin:$PATH"
 
 # Working directory that will hold everything
 git clone https://github.com/CoKeMon-SECTRS/qemu-setup-instructions.git
-export ROOT=$PWD
+COKEMON=$PWD
 ```
 
 ## 1. Linaro CCA stack
 
 ```bash
-mkdir $ROOT/cca && cd $ROOT/cca
-repo init -u $ROOT/qemu-setup-instructions -m qemu_v8_cca.xml
+mkdir $COKEMON/cca && cd $COKEMON/cca
+repo init -u $COKEMON/qemu-setup-instructions -m qemu_v8_cca.xml
 repo sync -j$(nproc)
 
-cd $ROOT/cca/linux
-git am $ROOT/qemu-setup-instructions/patches/0001-CoKeMon-Modifications-for-Linux-with-QEMU.patch
+cd $COKEMON/cca/linux
+git am $COKEMON/qemu-setup-instructions/patches/0001-CoKeMon-Modifications-for-Linux-with-QEMU.patch
 ```
 
 ## 2. L4Re and Fiasco
@@ -41,14 +41,14 @@ git am $ROOT/qemu-setup-instructions/patches/0001-CoKeMon-Modifications-for-Linu
 ### 2a. Sources
 
 ```bash
-mkdir $ROOT/l4re_qemu && cd $ROOT/l4re_qemu
+mkdir $COKEMON/l4re_qemu && cd $COKEMON/l4re_qemu
 git clone https://github.com/kernkonzept/ham.git
 ./ham/ham init -u https://github.com/kernkonzept/manifest.git
-cp $ROOT/qemu-setup-instructions/manifest.xml .ham/manifest.xml
+cp $COKEMON/qemu-setup-instructions/manifest.xml .ham/manifest.xml
 ./ham/ham sync
 
 # Pin the Kernkonzept packages to match the fork's build system
-cd $ROOT/l4re_qemu/l4/pkg
+cd $COKEMON/l4re_qemu/l4/pkg
 for d in acpica ada ahci-driver atkins cons emmc-driver gnu-efi hello \
          virtio-net-switch l4re-core l4virtio libblock-device libfdt libvcpu \
          nvme-driver readline rtc tinit tvmm uvmm virtio-net zlib; do
@@ -56,7 +56,7 @@ for d in acpica ada ahci-driver atkins cons emmc-driver gnu-efi hello \
 done
 
 # Upstream mk commit required by the pinned packages
-cd $ROOT/l4re_qemu/l4
+cd $COKEMON/l4re_qemu/l4
 git checkout -b cokemon-local
 git fetch https://github.com/kernkonzept/mk.git master
 git cherry-pick 49119d0
@@ -69,19 +69,19 @@ git commit -qam "QEMU CCA: place osswitch modules at 0xc1000000"
 ### 2b. Patched io, drivers-frst and bootstrap
 
 ```bash
-cd $ROOT/l4re_qemu/l4/pkg/io
+cd $COKEMON/l4re_qemu/l4/pkg/io
 git init -q
 git fetch https://github.com/kernkonzept/io.git ca4f36d7a552f0db8c413840947a0842eb47e6fb
 git checkout -f FETCH_HEAD
 git am CokeMon-modifications.patch
 
-cd $ROOT/l4re_qemu/l4/pkg/drivers-frst
+cd $COKEMON/l4re_qemu/l4/pkg/drivers-frst
 git init -q
 git fetch https://github.com/kernkonzept/drivers-frst.git 70000c2cd4ff8dc78b670208b7c612b756d689bd
 git checkout -f FETCH_HEAD
 git am CoKeMon-Modifications.patch
 
-cd $ROOT/l4re_qemu/l4/pkg/bootstrap
+cd $COKEMON/l4re_qemu/l4/pkg/bootstrap
 git init -q
 git fetch https://github.com/kernkonzept/bootstrap.git f9f0f20aa52ccb50ea3cc6d0547ec05473ed8179
 git checkout -f FETCH_HEAD
@@ -91,7 +91,7 @@ git am CokeMon-modifications.patch
 ### 2c. Build
 
 ```bash
-cd $ROOT/l4re_qemu
+cd $COKEMON/l4re_qemu
 cat > env.sh << EOF
 export L4RE_SRCDIR="$(pwd)/l4"
 export L4RE_OBJDIR_ARM64="$(pwd)/l4re_builds/arm64"
@@ -101,7 +101,7 @@ EOF
 source env.sh
 
 # Fiasco, loaded at 0xc8001000
-cd $ROOT/l4re_qemu/fiasco
+cd $COKEMON/l4re_qemu/fiasco
 make B=../fiasco_builds/arm64 T=arm64-virt-el2
 cd ../fiasco_builds/arm64
 echo 'CONFIG_ARM_SMC_USER=y' >> globalconfig.out
@@ -110,7 +110,7 @@ make olddefconfig
 make -j$(nproc)
 
 # L4Re, bootstrap linked at 0xc0000000
-cd $ROOT/l4re_qemu/l4
+cd $COKEMON/l4re_qemu/l4
 make B=../l4re_builds/arm64 T=arm64-virt-v8a
 cd ../l4re_builds/arm64
 mkdir -p conf
@@ -122,7 +122,7 @@ make -j$(nproc)
 ## 3. Disk image
 
 ```bash
-mkdir -p $ROOT/cca/fake-disk && cd $ROOT/cca/fake-disk
+mkdir -p $COKEMON/cca/fake-disk && cd $COKEMON/cca/fake-disk
 dd if=/dev/zero of=log.img bs=1M count=64
 sgdisk -n 1:2048:+60M -t 1:8300 log.img
 sgdisk -u 1:115715E5-F934-471E-9A9F-AEB7DE29A878 log.img
@@ -131,19 +131,19 @@ sgdisk -u 1:115715E5-F934-471E-9A9F-AEB7DE29A878 log.img
 ## 4. Build the CCA system and images
 
 ```bash
-cd $ROOT/cca/build
+cd $COKEMON/cca/build
 BR_FLAGS="BR2_PACKAGE_KVMTOOL_CCA=n BR2_PACKAGE_QEMU_CCA=n \
           BR2_PACKAGE_CCA_WORKLOAD_ATTESTATION=n"
 make -j$(nproc) toolchains
 make -j$(nproc) $BR_FLAGS
 dtc -I dts -O dtb -o ../out/bin/cca.dtb cca.dts
 
-cd $ROOT/l4re_qemu/l4re_builds/arm64
+cd $COKEMON/l4re_qemu/l4re_builds/arm64
 source ../../env.sh
 make E=osswitch rawimage \
-  MODULE_SEARCH_PATH=$ROOT/l4re_qemu/fiasco_builds/arm64:$ROOT/l4re_qemu/l4/conf/examples
-cp images/bootstrap_osswitch.raw $ROOT/cca/out/bin/Image_Micro_Switch
-cp $ROOT/cca/linux/arch/arm64/boot/Image $ROOT/cca/out/bin/Image_Linux
+  MODULE_SEARCH_PATH=$COKEMON/l4re_qemu/fiasco_builds/arm64:$COKEMON/l4re_qemu/l4/conf/examples
+cp images/bootstrap_osswitch.raw $COKEMON/cca/out/bin/Image_Micro_Switch
+cp $COKEMON/cca/linux/arch/arm64/boot/Image $COKEMON/cca/out/bin/Image_Linux
 ```
 
 ## 5. Run
@@ -151,7 +151,7 @@ cp $ROOT/cca/linux/arch/arm64/boot/Image $ROOT/cca/out/bin/Image_Linux
 From inside a tmux session:
 
 ```bash
-cd $ROOT/cca/build
+cd $COKEMON/cca/build
 ./run.sh
 ```
 
@@ -163,5 +163,5 @@ Each console opens in its own tmux window. In the Linux console, log in as
 After shutting down QEMU:
 
 ```bash
-dd if=$ROOT/cca/fake-disk/log.img bs=512 skip=2048 count=20 2>/dev/null | strings -n 1
+dd if=$COKEMON/cca/fake-disk/log.img bs=512 skip=2048 count=20 2>/dev/null | strings -n 1
 ```
