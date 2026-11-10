@@ -69,29 +69,23 @@ git commit -qam "QEMU CCA: place osswitch modules at 0xc1000000"
 ### 2b. Patched io, drivers-frst and bootstrap
 
 ```bash
-cd $ROOT/l4re_qemu/l4/pkg
-TMP=$(mktemp -d)
-for spec in io:ca4f36d7a552f0db8c413840947a0842eb47e6fb \
-            drivers-frst:70000c2cd4ff8dc78b670208b7c612b756d689bd \
-            bootstrap:f9f0f20aa52ccb50ea3cc6d0547ec05473ed8179; do
-  n=${spec%%:*}; c=${spec#*:}
-  git clone -q https://github.com/kernkonzept/$n.git $TMP/$n
-  git -C $TMP/$n checkout -q $c
-  cp -an $TMP/$n/. $n/
-done
-rm -rf $TMP
+cd $ROOT/l4re_qemu/l4/pkg/io
+git init -q
+git fetch https://github.com/kernkonzept/io.git ca4f36d7a552f0db8c413840947a0842eb47e6fb
+git checkout -f FETCH_HEAD
+git am CokeMon-modifications.patch
 
-(cd io && git am -p3 CokeMon-modifications.patch)
-(cd drivers-frst &&
-  sed -n '/uart_base.h$/,/^diff/p' CoKeMon-Modifications.patch | sed '1d;$d' \
-    | patch --no-backup-if-mismatch uart/include/uart_base.h &&
-  sed -n '/uart_16550.cc$/,$p' CoKeMon-Modifications.patch | sed '1d' \
-    | patch --no-backup-if-mismatch uart/src/uart_16550.cc)
-(cd bootstrap &&
-  sed -n '/dt.cc$/,/^diff/p' CokeMon-modifications.patch | sed '1d;$d' \
-    | patch --no-backup-if-mismatch server/src/dt.cc &&
-  sed -n '/Makefile.platform$/,/^Only/p' CokeMon-modifications.patch | sed '1d;$d' \
-    | patch --no-backup-if-mismatch server/src/Makefile.platform)
+cd $ROOT/l4re_qemu/l4/pkg/drivers-frst
+git init -q
+git fetch https://github.com/kernkonzept/drivers-frst.git 70000c2cd4ff8dc78b670208b7c612b756d689bd
+git checkout -f FETCH_HEAD
+git am CoKeMon-Modifications.patch
+
+cd $ROOT/l4re_qemu/l4/pkg/bootstrap
+git init -q
+git fetch https://github.com/kernkonzept/bootstrap.git f9f0f20aa52ccb50ea3cc6d0547ec05473ed8179
+git checkout -f FETCH_HEAD
+git am CokeMon-modifications.patch
 ```
 
 ### 2c. Build
@@ -130,8 +124,8 @@ make -j$(nproc)
 ```bash
 mkdir -p $ROOT/cca/fake-disk && cd $ROOT/cca/fake-disk
 dd if=/dev/zero of=log.img bs=1M count=64
-/usr/sbin/sgdisk -n 1:2048:+60M -t 1:8300 log.img
-/usr/sbin/sgdisk -u 1:115715E5-F934-471E-9A9F-AEB7DE29A878 log.img
+sgdisk -n 1:2048:+60M -t 1:8300 log.img
+sgdisk -u 1:115715E5-F934-471E-9A9F-AEB7DE29A878 log.img
 ```
 
 ## 4. Build the CCA system and images
