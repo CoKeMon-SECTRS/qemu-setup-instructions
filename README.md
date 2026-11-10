@@ -13,7 +13,7 @@ sudo apt install build-essential git python3 python3-pip python3-venv \
     libcap-ng-dev libattr1-dev uuid-dev acpica-tools \
     python3-pyelftools python3-cryptography python3-tomli meson \
     perl libgit-repository-perl libxml-parser-perl liburi-perl \
-    cpio unzip wget curl rsync file xz-utils tmux
+    cpio unzip wget curl rsync file xz-utils tmux netcat-openbsd
 
 mkdir -p ~/.local/bin
 curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.local/bin/repo
