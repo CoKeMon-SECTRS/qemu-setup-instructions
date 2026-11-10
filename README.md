@@ -1,134 +1,103 @@
-# ARM CCA OS-Switching with eMMC Block Storage Logging
-
-OS-switching between Linux and L4Re/Fiasco on ARM CCA via SMC calls through
-TF-A. An L4Re application (`osswitch`) captures Linux kernel logs after each
-OS switch and writes them to a persistent eMMC block device.
+# CoKeMon with eMMC Storage Logging on QEMU
 
 ## Prerequisites
 
-Linux x86_64 host (Ubuntu/Debian) with at least 16 GB RAM.
+Tested on Debian 13 (trixie).
 
 ```bash
-sudo apt install build-essential git python3 python3-pip \
+sudo apt install build-essential git python3 python3-pip python3-venv \
     gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-    device-tree-compiler gdisk \
+    device-tree-compiler gdisk gawk cmake \
     flex bison libssl-dev bc \
-    libglib2.0-dev libpixman-1-dev ninja-build \
+    libglib2.0-dev libpixman-1-dev libfdt-dev libslirp-dev ninja-build \
+    libcap-ng-dev libattr1-dev uuid-dev acpica-tools \
+    python3-pyelftools python3-cryptography python3-tomli meson \
     perl libgit-repository-perl libxml-parser-perl liburi-perl \
-    cpio unzip wget curl
-```
+    cpio unzip wget curl rsync file xz-utils tmux
 
-Install the `repo` tool:
-```bash
 mkdir -p ~/.local/bin
 curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.local/bin/repo
 chmod a+x ~/.local/bin/repo
 export PATH="$HOME/.local/bin:$PATH"
+
+# Working directory that will hold everything
+git clone https://github.com/CoKeMon-SECTRS/qemu-setup-instructions.git
+export ROOT=$PWD
 ```
 
-## Directory layout
-
-All commands below assume the following directory structure, rooted in a
-working directory of your choice (referred to as `$ROOT`):
-
-```
-$ROOT/
-├── cca/                     # Linaro CCA stack (section 1)
-│   ├── build/
-│   ├── linux/
-│   ├── trusted-firmware-a/
-│   ├── out/bin/
-│   └── fake-disk/
-├── qemu-setup-instructions/ # This repository (section 2)
-└── l4re_qemu/               # L4Re + Fiasco (section 3)
-    ├── l4/
-    ├── fiasco/
-    ├── ham/
-    ├── fiasco_builds/arm64/
-    └── l4re_builds/arm64/
-```
-
-## 1. Set up the Linaro CCA base system
-
-This project is built on top of the Linaro OP-TEE QEMU v8 CCA reference stack.
-The original Linaro CCA build instructions are at
-[gitlab.com/Linaro/cca-public/build-instructions](https://gitlab.com/Linaro/cca-public/build-instructions).
-
-This repository includes updated `repo` manifest files (`qemu_v8_cca.xml` and
-`common.xml`) that mirror the repos originally hosted on `git.codelinaro.org`
-(no longer publicly accessible) to the CoKeMon-SECTRS GitHub organization.
+## 1. Linaro CCA stack
 
 ```bash
-# From $ROOT
-git clone <this-repo-url> qemu-setup-instructions
-mkdir cca && cd cca
+mkdir $ROOT/cca && cd $ROOT/cca
 repo init -u $ROOT/qemu-setup-instructions -m qemu_v8_cca.xml
 repo sync -j$(nproc)
-cd ..
+
+cd $ROOT/cca/linux
+git am $ROOT/qemu-setup-instructions/patches/0001-CoKeMon-Modifications-for-Linux-with-QEMU.patch
 ```
 
-This clones all components (TF-A, Linux, QEMU, buildroot, etc.) into `cca/`.
-The key versions pulled by this manifest are:
+## 2. L4Re and Fiasco
 
-| Component | Source | Revision |
-|-----------|--------|----------|
-| Build system | `github.com/CoKeMon-SECTRS/qemu-cca-build` | `main` |
-| TF-A | `github.com/CoKeMon-SECTRS/qemu-cca-trusted-firmware-a` | `main` |
-| RMM | `github.com/CoKeMon-SECTRS/qemu-cca-rmm` | `main` |
-| Linux | `git.gitlab.arm.com/linux-arm/linux-cca` | `cca-host/v7` |
-| QEMU | `github.com/qemu/qemu.git` | `stable-9.2` |
-| Buildroot | `github.com/buildroot/buildroot.git` | `2024.08` |
-| OP-TEE OS | `github.com/OP-TEE/optee_os.git` | `4.2.0` |
-| Hafnium | `git.trustedfirmware.org/hafnium/hafnium.git` | `v2.10` |
-
-## 2. Apply patches to Linux, TF-A, and the build system
-
-Apply the CoKeMon patches on top of the Linaro repos:
+### 2a. Sources
 
 ```bash
-# From $ROOT
-cd cca/trusted-firmware-a
-git am ../../qemu-setup-instructions/patches/0001-CoKeMon-Modifications-for-TF-A-with-QEMU.patch
-cd ..
-
-cd linux
-git am ../../qemu-setup-instructions/patches/0001-CoKeMon-Modifications-for-Linux-with-QEMU.patch
-cd ..
-
-cd build
-git am ../../qemu-setup-instructions/patches/0001-Modifications-for-Cokemon.patch
-cd ../..
-```
-
-## 3. Set up L4Re and Fiasco
-
-L4Re and Fiasco are developed by Kernkonzept. The original setup instructions
-are at [kernkonzept.com/L4Re/guides/l4re](https://kernkonzept.com/L4Re/guides/l4re).
-The source repositories are at [github.com/kernkonzept](https://github.com/kernkonzept).
-
-### 3a. Clone all repositories with ham
-
-This repository includes a custom `manifest.xml` that points the modified
-packages (L4Re build system, bootstrap, io, drivers-frst, osswitch) and Fiasco
-to the CoKeMon forks, while fetching all other packages from Kernkonzept:
-
-```bash
-# From $ROOT
-mkdir l4re_qemu && cd l4re_qemu
+mkdir $ROOT/l4re_qemu && cd $ROOT/l4re_qemu
 git clone https://github.com/kernkonzept/ham.git
 ./ham/ham init -u https://github.com/kernkonzept/manifest.git
-cp ../qemu-setup-instructions/manifest.xml .ham/manifest.xml
+cp $ROOT/qemu-setup-instructions/manifest.xml .ham/manifest.xml
 ./ham/ham sync
+
+# Pin the Kernkonzept packages to match the fork's build system
+cd $ROOT/l4re_qemu/l4/pkg
+for d in acpica ada ahci-driver atkins cons emmc-driver gnu-efi hello \
+         virtio-net-switch l4re-core l4virtio libblock-device libfdt libvcpu \
+         nvme-driver readline rtc tinit tvmm uvmm virtio-net zlib; do
+  git -C $d checkout -q $(git -C $d rev-list -1 --before='2025-06-10 23:59' HEAD)
+done
+
+# Upstream mk commit required by the pinned packages
+cd $ROOT/l4re_qemu/l4
+git checkout -b cokemon-local
+git fetch https://github.com/kernkonzept/mk.git master
+git cherry-pick 49119d0
+
+# Place the osswitch modules at 0xc1000000
+sed -i '/^entry osswitch$/a modaddr 0x81000000' conf/modules.list
+git commit -qam "QEMU CCA: place osswitch modules at 0xc1000000"
 ```
 
-### 3b. Set up the build environment
-
-Create the environment file and build Fiasco and L4Re:
+### 2b. Patched io, drivers-frst and bootstrap
 
 ```bash
-# From $ROOT/l4re_qemu
+cd $ROOT/l4re_qemu/l4/pkg
+TMP=$(mktemp -d)
+for spec in io:ca4f36d7a552f0db8c413840947a0842eb47e6fb \
+            drivers-frst:70000c2cd4ff8dc78b670208b7c612b756d689bd \
+            bootstrap:f9f0f20aa52ccb50ea3cc6d0547ec05473ed8179; do
+  n=${spec%%:*}; c=${spec#*:}
+  git clone -q https://github.com/kernkonzept/$n.git $TMP/$n
+  git -C $TMP/$n checkout -q $c
+  cp -an $TMP/$n/. $n/
+done
+rm -rf $TMP
 
-# Create env.sh with absolute paths
+(cd io && git am -p3 CokeMon-modifications.patch)
+(cd drivers-frst &&
+  sed -n '/uart_base.h$/,/^diff/p' CoKeMon-Modifications.patch | sed '1d;$d' \
+    | patch --no-backup-if-mismatch uart/include/uart_base.h &&
+  sed -n '/uart_16550.cc$/,$p' CoKeMon-Modifications.patch | sed '1d' \
+    | patch --no-backup-if-mismatch uart/src/uart_16550.cc)
+(cd bootstrap &&
+  sed -n '/dt.cc$/,/^diff/p' CokeMon-modifications.patch | sed '1d;$d' \
+    | patch --no-backup-if-mismatch server/src/dt.cc &&
+  sed -n '/Makefile.platform$/,/^Only/p' CokeMon-modifications.patch | sed '1d;$d' \
+    | patch --no-backup-if-mismatch server/src/Makefile.platform)
+```
+
+### 2c. Build
+
+```bash
+cd $ROOT/l4re_qemu
 cat > env.sh << EOF
 export L4RE_SRCDIR="$(pwd)/l4"
 export L4RE_OBJDIR_ARM64="$(pwd)/l4re_builds/arm64"
@@ -137,97 +106,68 @@ export KERNEL_OBJDIR_ARM64="$(pwd)/fiasco_builds/arm64"
 EOF
 source env.sh
 
-# Create and build Fiasco
-cd fiasco
+# Fiasco, loaded at 0xc8001000
+cd $ROOT/l4re_qemu/fiasco
 make B=../fiasco_builds/arm64 T=arm64-virt-el2
 cd ../fiasco_builds/arm64
 echo 'CONFIG_ARM_SMC_USER=y' >> globalconfig.out
+echo 'override RAM_PHYS_BASE := 0xc8000000' > Makeconf.local
 make olddefconfig
 make -j$(nproc)
 
-# Create and build L4Re
-cd ../../l4
-make B=../l4re_builds/arm64 T=arm64
+# L4Re, bootstrap linked at 0xc0000000
+cd $ROOT/l4re_qemu/l4
+make B=../l4re_builds/arm64 T=arm64-virt-v8a
 cd ../l4re_builds/arm64
+mkdir -p conf
+echo 'DEFAULT_RELOC_arm64 := 0x80000000' > conf/Makeconf.boot
 make olddefconfig
 make -j$(nproc)
-cd ../..
 ```
 
-## 4. Create the disk image
+## 3. Disk image
 
 ```bash
-# From $ROOT
-mkdir -p cca/fake-disk
-dd if=/dev/zero of=cca/fake-disk/log.img bs=1M count=64
-sgdisk -n 1:2048:+60M -t 1:8300 cca/fake-disk/log.img
-sgdisk -u 1:115715E5-F934-471E-9A9F-AEB7DE29A878 cca/fake-disk/log.img
+mkdir -p $ROOT/cca/fake-disk && cd $ROOT/cca/fake-disk
+dd if=/dev/zero of=log.img bs=1M count=64
+/usr/sbin/sgdisk -n 1:2048:+60M -t 1:8300 log.img
+/usr/sbin/sgdisk -u 1:115715E5-F934-471E-9A9F-AEB7DE29A878 log.img
 ```
 
-The partition UUID `115715E5-F934-471E-9A9F-AEB7DE29A878` must match the
-`--device` argument in `osswitch-blk.cfg`.
-
-## 5. Build the CCA system
+## 4. Build the CCA system and images
 
 ```bash
-# From $ROOT
-
-# Build TF-A, Linux, QEMU, buildroot
-cd cca/build
-make -j$(nproc)
-
-# Compile the device tree
+cd $ROOT/cca/build
+BR_FLAGS="BR2_PACKAGE_KVMTOOL_CCA=n BR2_PACKAGE_QEMU_CCA=n \
+          BR2_PACKAGE_CCA_WORKLOAD_ATTESTATION=n"
+make -j$(nproc) toolchains
+make -j$(nproc) $BR_FLAGS
 dtc -I dts -O dtb -o ../out/bin/cca.dtb cca.dts
 
-# Build the L4Re rawimage
-cd ../../l4re_qemu/l4re_builds/arm64
+cd $ROOT/l4re_qemu/l4re_builds/arm64
+source ../../env.sh
 make E=osswitch rawimage \
-  MODULE_SEARCH_PATH=../../fiasco_builds/arm64:../../l4/conf/examples
-
-# Copy images to the CCA output directory
-cp images/rawimage ../../../cca/out/bin/Image_Micro_Switch
-cp ../../../cca/linux/arch/arm64/boot/Image ../../../cca/out/bin/Image_Linux
-cd ../../..
+  MODULE_SEARCH_PATH=$ROOT/l4re_qemu/fiasco_builds/arm64:$ROOT/l4re_qemu/l4/conf/examples
+cp images/bootstrap_osswitch.raw $ROOT/cca/out/bin/Image_Micro_Switch
+cp $ROOT/cca/linux/arch/arm64/boot/Image $ROOT/cca/out/bin/Image_Linux
 ```
 
-## 6. Run
+## 5. Run
+
+From inside a tmux session:
 
 ```bash
-# From $ROOT
-cd cca/build
-make run-only
+cd $ROOT/cca/build
+./run.sh
 ```
 
-Connect to the L4Re console:
-```bash
-telnet localhost 54321
-```
+Each console opens in its own tmux window. In the Linux console, log in as
+`root` and test the logging with `echo "Test" > /dev/logmicro`.
 
-## 7. Verify logged data
+## 6. Verify logged data
 
-After shutting down QEMU, read the log data from the disk image:
+After shutting down QEMU:
 
 ```bash
-# From $ROOT
-dd if=cca/fake-disk/log.img bs=512 skip=2048 count=20 2>/dev/null | strings -n 1
-```
-
-To reset the image for a fresh run:
-```bash
-dd if=/dev/zero of=cca/fake-disk/log.img bs=512 seek=2048 count=20 conv=notrunc
-```
-
-## Repository structure
-
-```
-qemu-setup-instructions/
-├── README.md                 # This file
-├── qemu_v8_cca.xml           # Linaro CCA repo manifest (CoKeMon-SECTRS mirrors)
-├── common.xml                # Shared manifest (included by qemu_v8_cca.xml)
-├── manifest.xml              # Custom ham manifest for L4Re + Fiasco
-├── read.sh                   # Script to read logged data from the disk image
-└── patches/
-    ├── 0001-CoKeMon-Modifications-for-Linux-with-QEMU.patch
-    ├── 0001-CoKeMon-Modifications-for-TF-A-with-QEMU.patch
-    └── 0001-Modifications-for-Cokemon.patch
+dd if=$ROOT/cca/fake-disk/log.img bs=512 skip=2048 count=20 2>/dev/null | strings -n 1
 ```
